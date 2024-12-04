@@ -60,8 +60,13 @@ const Chats = () => {
               <img
                 src={chat[1].userInfo.photoURL}
                 alt={chat[1].userInfo.displayName}
-                className="w-14 h-14 rounded-full object-cover mr-4 border-3 border-blue-200 
-                  shadow-md hover:shadow-lg transition duration-300"
+                className="w-14 h-14 rounded-full object-cover mr-4
+                  border-[3px] border-gray-300 hover:border-gray-400
+                  shadow-lg hover:shadow-xl
+                  transition-all duration-300 ease-in-out
+                  transform hover:scale-105 hover:rotate-3
+                  ring-2 ring-gray-100 hover:ring-gray-200
+                  filter hover:brightness-105"
               />
 
               <div className="flex-1 min-w-0">

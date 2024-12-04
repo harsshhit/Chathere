@@ -1,6 +1,5 @@
 import React, { useContext, useState } from "react";
-import Img from "../img/img.png";
-import send from "../img/send.png";
+import { Image, Send } from "lucide-react"; // Using Lucide icons instead of images
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import {
@@ -81,16 +80,19 @@ const Input = () => {
   };
 
   return (
-    <div className="flex items-center bg-gray-100 p-4 rounded-lg shadow-sm">
+    <div className="flex items-center bg-blue-50 p-6 rounded-2xl shadow-lg border border-blue-100">
       <input
         type="text"
         placeholder="Type something..."
-        className="flex-grow px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300"
+        className="flex-grow px-6 py-4 text-blue-900 bg-white border-2 border-blue-200 rounded-l-2xl 
+          focus:outline-none focus:ring-4 focus:ring-blue-200 focus:border-blue-400
+          placeholder-blue-400 text-lg font-medium
+          transition-all duration-300 ease-in-out"
         onChange={(e) => setText(e.target.value)}
         onKeyPress={handleKeyPress}
         value={text}
       />
-      <div className="flex items-center bg-white border-y border-r border-gray-300 rounded-r-lg">
+      <div className="flex items-center bg-white border-y-2 border-r-2 border-blue-200 rounded-r-2xl">
         <input
           type="file"
           style={{ display: "none" }}
@@ -99,19 +101,20 @@ const Input = () => {
         />
         <label
           htmlFor="file"
-          className="p-2 cursor-pointer hover:bg-gray-100 transition duration-300 rounded-l-lg"
+          className="p-4 cursor-pointer hover:bg-blue-50 transition-all duration-300 rounded-l-xl
+            group active:bg-blue-100"
         >
-          <img
-            src={Img}
-            alt="Attach"
-            className="w-6 h-6 text-gray-600 hover:text-blue-500"
-          />
+          <Image className="w-7 h-7 text-blue-500 group-hover:text-blue-600 group-hover:scale-110 
+            transition-all duration-300" />
         </label>
         <button
           onClick={handleSend}
-          className="p-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600 transition duration-300 flex items-center justify-center"
+          className="p-4 bg-blue-600 text-white rounded-r-2xl hover:bg-blue-700 
+            active:bg-blue-800 transition-all duration-300 
+            flex items-center justify-center group"
         >
-          <img src={send} alt="Send" className="w-6 h-6" />
+          <Send className="w-7 h-7 group-hover:scale-110 group-hover:rotate-12 
+            transition-all duration-300" />
         </button>
       </div>
     </div>

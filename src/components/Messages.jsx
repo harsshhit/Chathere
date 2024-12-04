@@ -19,16 +19,22 @@ const Messages = () => {
   }, [data.chatId]);
 
   return (
-    <div className="bg-gray-50 h-[calc(100vh-130px)] md:h-[calc(100vh-160px)] overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+    <div className="bg-blue-50 h-[calc(100vh-130px)] md:h-[calc(100vh-160px)] overflow-y-auto p-6 space-y-6 
+      scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100 
+      shadow-inner border border-blue-100 rounded-lg">
       {messages.length === 0 ? (
-        <div className="text-center text-gray-500 py-10">
-          No messages yet. Start chatting!
+        <div className="text-center text-blue-600 py-12 px-4 bg-white bg-opacity-60 
+          rounded-xl shadow-md backdrop-blur-sm border border-blue-200">
+          <p className="text-xl font-bold animate-pulse">
+            No messages yet. Start chatting!
+          </p>
         </div>
       ) : (
         messages.map((m, index) => (
           <div
             key={m.id || index}
-            className="transition-all duration-300 ease-in-out hover:bg-gray-50"
+            className="transition-all duration-300 ease-in-out  
+              rounded-lg  hover:-translate-y-0.5"
           >
             <Message message={m} />
           </div>

@@ -1,5 +1,5 @@
 import React, { useContext } from "react";
-import { ArrowLeft, Phone, Video, MoreVertical } from "lucide-react";
+import { ArrowLeftCircle, PhoneCall, Video, Settings2 } from "lucide-react";
 import { motion } from "framer-motion";
 import Messages from "./Messages";
 import Input from "./Input";
@@ -19,48 +19,61 @@ const Chat = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="h-full flex flex-col bg-white md:bg-transparent"
+      className="h-full flex flex-col bg-white md:bg-transparent rounded-2xl shadow-xl"
     >
       <motion.div 
         initial={{ y: -20 }}
         animate={{ y: 0 }}
-        className="bg-white shadow-sm border-b border-gray-100 p-4 flex items-center justify-between sticky top-0 z-10"
+        className="bg-white shadow-lg border-b border-blue-100 p-4 flex items-center justify-between sticky top-0 z-10 rounded-t-2xl backdrop-blur-sm bg-opacity-90"
       >
         <div className="flex items-center space-x-4">
           <motion.button 
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            className="md:hidden text-gray-600 hover:text-indigo-600 p-2 -ml-2 rounded-full hover:bg-gray-50"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="md:hidden text-blue-600 hover:text-blue-700 p-2 -ml-2 rounded-full hover:bg-blue-50 transition-colors duration-200"
             onClick={handleBack}
           >
-            <ArrowLeft size={24} />
+            <ArrowLeftCircle size={26} />
           </motion.button>
 
           {data.user?.photoURL && (
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-4">
               <motion.img
                 initial={{ scale: 0.5 }}
                 animate={{ scale: 1 }}
+                whileHover={{ scale: 1.05 }}
                 src={data.user?.photoURL}
                 alt={data.user?.displayName}
-                className="w-10 h-10 rounded-full object-cover border-2 border-indigo-100"
+                className="w-12 h-12 rounded-full object-cover border-2 border-blue-200 shadow-md hover:border-blue-300 transition-all duration-200"
               />
-              <span className="font-semibold text-gray-800 line-clamp-1">
+              <span className="font-bold text-gray-800 text-lg line-clamp-1 hover:text-blue-600 transition-colors duration-200">
                 {data.user?.displayName}
               </span>
             </div>
           )}
         </div>
 
-        <div className="flex items-center space-x-2 md:space-x-4">
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-            <Phone className="w-8 h-8 p-1.5 text-gray-600 hover:text-green-500 transition-colors hover:bg-gray-50 rounded-full" />
+        <div className="flex items-center space-x-2 md:space-x-3">
+          <motion.button 
+            whileHover={{ scale: 1.05 }} 
+            whileTap={{ scale: 0.95 }}
+            className="p-2 rounded-full hover:bg-green-50 transition-all duration-200 group"
+          >
+            <PhoneCall className="w-6 h-6 text-blue-600 group-hover:text-green-500 transition-colors duration-200" />
           </motion.button>
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-            <Video className="w-8 h-8 p-1.5 text-gray-600 hover:text-indigo-500 transition-colors hover:bg-gray-50 rounded-full" />
+          <motion.button 
+            whileHover={{ scale: 1.05 }} 
+            whileTap={{ scale: 0.95 }}
+            className="p-2 rounded-full hover:bg-blue-50 transition-all duration-200 group"
+          >
+            <Video className="w-6 h-6 text-blue-600 group-hover:text-blue-700 transition-colors duration-200" />
           </motion.button>
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-            <MoreVertical className="w-8 h-8 p-1.5 text-gray-600 hover:text-indigo-600 transition-colors hover:bg-gray-50 rounded-full" />
+          <motion.button 
+            whileHover={{ scale: 1.05 }} 
+            whileTap={{ scale: 0.95 }}
+            className="p-2 rounded-full hover:bg-blue-50 transition-all duration-200 group"
+          >
+            <Settings2 className="w-6 h-6 text-blue-600 group-hover:text-blue-700 transition-colors duration-200" />
           </motion.button>
         </div>
       </motion.div>
@@ -70,14 +83,14 @@ const Chat = () => {
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex-1 overflow-y-auto bg-gray-50"
+            className="flex-1 overflow-y-auto bg-gradient-to-b from-blue-50 to-white"
           >
             <Messages />
           </motion.div>
           <motion.div 
             initial={{ y: 20 }}
             animate={{ y: 0 }}
-            className="bg-white border-t border-gray-100"
+            className="bg-white border-t border-blue-100 rounded-b-2xl shadow-lg backdrop-blur-sm bg-opacity-90"
           >
             <Input />
           </motion.div>
@@ -86,10 +99,10 @@ const Chat = () => {
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex-1 flex items-center justify-center bg-gray-50"
+          className="flex-1 flex items-center justify-center bg-gradient-to-b from-blue-50 to-white rounded-b-2xl"
         >
-          <div className="text-center text-gray-500">
-            <p className="text-xl">Select a chat to start messaging</p>
+          <div className="text-center p-8 bg-white bg-opacity-80 rounded-2xl shadow-lg backdrop-blur-sm">
+            <p className="text-2xl font-bold text-blue-600 animate-pulse">Select a chat to start messaging</p>
           </div>
         </motion.div>
       )}
