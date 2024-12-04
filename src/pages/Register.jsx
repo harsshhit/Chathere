@@ -1,14 +1,13 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { auth, db, storage } from "../firebase";
+import { createUserWithEmailAndPassword, updateProfile, signInWithPopup } from "firebase/auth";
+import { auth, db, storage, googleProvider } from "../firebase";
 import {
   ref,
   uploadBytesResumable,
   getDownloadURL,
-  // getStorage,
 } from "firebase/storage";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 import { User, Mail, Lock, ImagePlus } from "lucide-react";
 
 const Register = () => {
@@ -38,20 +37,16 @@ const Register = () => {
 
       // Upload the file to Firebase Storage
       const storageRef = ref(storage, fileName);
-      // const storageInstance = getStorage();
       const uploadTask = uploadBytesResumable(storageRef, avatar);
       await new Promise((resolve, reject) => {
         uploadTask.on("state_changed", null, reject, () => {
-          // Get the download URL
           getDownloadURL(storageRef)
             .then(async (downloadURL) => {
-              // Update user profile
               await updateProfile(res.user, {
                 displayName,
                 photoURL: downloadURL,
               });
 
-              // Create user document in Firestore
               await setDoc(doc(db, "users", res.user.uid), {
                 uid: res.user.uid,
                 displayName,
@@ -59,14 +54,43 @@ const Register = () => {
                 photoURL: downloadURL,
               });
 
-              // Create empty user chats in Firestore
               await setDoc(doc(db, "userChats", res.user.uid), {});
-
               resolve();
             })
             .catch(reject);
         });
       });
+
+      navigate("/");
+    } catch (error) {
+      console.error(error);
+      setErr(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    try {
+      setLoading(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+
+      // Check if user already exists
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (!userDoc.exists()) {
+        // Create new user document
+        await setDoc(doc(db, "users", user.uid), {
+          uid: user.uid,
+          displayName: user.displayName,
+          email: user.email,
+          photoURL: user.photoURL,
+        });
+
+        // Create empty user chats
+        await setDoc(doc(db, "userChats", user.uid), {});
+      }
 
       navigate("/");
     } catch (error) {
@@ -152,15 +176,37 @@ const Register = () => {
             disabled={loading}
             className="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 transition duration-300 transform hover:scale-105 active:scale-95 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Signing Up..." : "Sign Up"}
+            {loading ? "Creating Account..." : "Sign Up"}
           </button>
-
-          {err && (
-            <p className="text-red-500 text-center animate-pulse">
-              Something went wrong. Please try again.
-            </p>
-          )}
         </form>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-white text-gray-500">Or continue with</span>
+          </div>
+        </div>
+
+        <button
+          onClick={handleGoogleSignUp}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 text-gray-700 py-3 rounded-lg hover:bg-gray-50 transition duration-300 shadow-sm"
+        >
+          <img 
+            src="https://www.google.com/favicon.ico" 
+            alt="Google" 
+            className="w-5 h-5"
+          />
+          Sign up with Google
+        </button>
+
+        {err && (
+          <p className="text-red-500 text-center animate-pulse">
+            Something went wrong. Please try again.
+          </p>
+        )}
 
         <div className="text-center">
           <p className="text-gray-600">

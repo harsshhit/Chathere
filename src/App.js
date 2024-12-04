@@ -11,21 +11,20 @@ import { UIProvider } from "./context/UIContext";
 const App = () => {
   const { currentUser } = useContext(AuthContext);
 
-  const ProtectedRoute = ({ children }) => (
-    currentUser ? children : <Navigate to="/login" />
-  );
+  const ProtectedRoute = ({ children }) =>
+    currentUser ? children : <Navigate to="/login" />;
 
   return (
     <UIProvider>
       <BrowserRouter basename="/">
         <Routes>
-          <Route 
-            index 
+          <Route
+            index
             element={
               <ProtectedRoute>
                 <Home />
               </ProtectedRoute>
-            } 
+            }
           />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />

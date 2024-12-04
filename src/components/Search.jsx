@@ -85,10 +85,10 @@ const Search = () => {
   };
 
   return (
-    <div className="p-4 bg-white border-b border-gray-200">
-      <div className="relative mb-4">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <SearchIcon className="text-gray-400 w-5 h-5" />
+    <div className="p-6 bg-gradient-to-br from-white to-blue-50 border-b border-blue-100 shadow-sm">
+      <div className="relative mb-6">
+        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+          <SearchIcon className="text-blue-400 w-6 h-6" />
         </div>
         <input
           type="text"
@@ -99,12 +99,12 @@ const Search = () => {
             setErr(false);
           }}
           value={username}
-          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 transition duration-300"
+          className="w-full pl-12 pr-6 py-3.5 border-2 border-blue-200 rounded-full focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400 transition duration-300 text-lg font-medium placeholder:text-blue-300 shadow-sm hover:shadow-md"
         />
       </div>
 
       {err && (
-        <div className="text-red-500 text-center mb-4 animate-pulse">
+        <div className="text-red-500 text-center mb-6 animate-pulse font-semibold bg-red-50 py-3 rounded-full border border-red-200">
           User not found! Try a different name.
         </div>
       )}
@@ -112,19 +112,19 @@ const Search = () => {
       {user && (
         <div
           onClick={handleSelect}
-          className="flex items-center p-3 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 transition duration-300 group"
+          className="flex items-center p-4 bg-white rounded-2xl cursor-pointer hover:bg-blue-50 transition duration-300 group border-2 border-blue-100 hover:border-blue-300 shadow-sm hover:shadow-md"
         >
           <img
             src={user.photoURL}
             alt={user.displayName}
-            className="w-12 h-12 rounded-full object-cover mr-4 border-2 border-purple-200 group-hover:scale-105 transition duration-300"
+            className="w-14 h-14 rounded-full object-cover mr-4 border-4 border-blue-200 group-hover:border-blue-300 group-hover:scale-105 transition duration-300 shadow-md"
           />
           <div className="flex-grow">
-            <span className="font-semibold text-gray-800 group-hover:text-purple-700 transition duration-300">
+            <span className="font-bold text-xl text-gray-800 group-hover:text-blue-700 transition duration-300">
               {user.displayName}
             </span>
           </div>
-          <User className="text-purple-500 group-hover:translate-x-1 transition duration-300" />
+          <User className="text-blue-500 w-6 h-6 group-hover:translate-x-1 transition duration-300" />
         </div>
       )}
     </div>
