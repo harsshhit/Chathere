@@ -12,25 +12,50 @@ const Message = ({ message }) => {
     ref.current?.scrollIntoView({ behavior: "smooth" });
   }, [message]);
 
+  const isOwner = message.senderId === currentUser.uid;
+
   return (
     <div
       ref={ref}
-      className={`message ${message.senderId === currentUser.uid && "owner"}`}
+      className={`flex items-end gap-3 mb-4 ${
+        isOwner ? "flex-row-reverse" : ""
+      }`}
     >
-      <div className="messageInfo">
+      {/* User Avatar */}
+      <div className="shrink-0">
         <img
-          src={
-            message.senderId === currentUser.uid
-              ? currentUser.photoURL
-              : data.user.photoURL
-          }
-          alt=""
+          src={isOwner ? currentUser.photoURL : data.user.photoURL}
+          alt="User avatar"
+          className="w-10 h-10 rounded-full object-cover"
         />
       </div>
-      <div className="messageContent">
-        <p>{message.text}</p>
-        {message.img && <img src={message.img} alt="" />}
-        
+
+      {/* Message Content */}
+      <div
+        className={`
+        max-w-[70%] 
+        ${
+          isOwner
+            ? "bg-blue-500 text-white rounded-l-xl rounded-br-xl"
+            : "bg-gray-200 text-black rounded-r-xl rounded-bl-xl"
+        } 
+        p-3 
+        shadow-sm
+      `}
+      >
+        {/* Text Message */}
+        {message.text && <p className="break-words">{message.text}</p>}
+
+        {/* Image Message */}
+        {message.img && (
+          <div className="mt-2 rounded-lg overflow-hidden">
+            <img
+              src={message.img}
+              alt="Shared content"
+              className="max-w-full h-auto object-cover rounded-lg"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

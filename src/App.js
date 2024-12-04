@@ -1,31 +1,38 @@
-import Register from "./pages/Register";
-import Home from "./pages/Home";
-import Login from "./pages/Login";
-
-import "./style.scss";
-// import "./style.css";
 import { Route, BrowserRouter, Routes, Navigate } from "react-router-dom";
 import { useContext } from "react";
 import { AuthContext } from "./context/AuthContext";
+import Register from "./pages/Register";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+// import "./style.scss";
+import "./index.css";
+import { UIProvider } from "./context/UIContext";
 
-function App() {
+const App = () => {
   const { currentUser } = useContext(AuthContext);
-  const ProtectedRoute = ({ children }) => {
-    if (!currentUser) {
-      return <Navigate to="/login" />;
-    }
 
-    return children;
-  };
-  return (
-    <BrowserRouter basename="/">
-      <Routes>
-        <Route index element={<ProtectedRoute> <Home /> </ProtectedRoute> } />
-        <Route path="login" element={<Login />} />
-        <Route path="register" element={<Register />} />
-      </Routes>
-    </BrowserRouter>
+  const ProtectedRoute = ({ children }) => (
+    currentUser ? children : <Navigate to="/login" />
   );
-}
+
+  return (
+    <UIProvider>
+      <BrowserRouter basename="/">
+        <Routes>
+          <Route 
+            index 
+            element={
+              <ProtectedRoute>
+                <Home />
+              </ProtectedRoute>
+            } 
+          />
+          <Route path="login" element={<Login />} />
+          <Route path="register" element={<Register />} />
+        </Routes>
+      </BrowserRouter>
+    </UIProvider>
+  );
+};
 
 export default App;

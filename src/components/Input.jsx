@@ -1,7 +1,6 @@
 import React, { useContext, useState } from "react";
 import Img from "../img/img.png";
 import send from "../img/send.png";
-// import Attach from "../img/attach.png";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import {
@@ -82,26 +81,37 @@ const Input = () => {
   };
 
   return (
-    <div className="input1">
+    <div className="flex items-center bg-gray-100 p-4 rounded-lg shadow-sm">
       <input
         type="text"
         placeholder="Type something..."
+        className="flex-grow px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300"
         onChange={(e) => setText(e.target.value)}
         onKeyPress={handleKeyPress}
         value={text}
       />
-      <div className="send">
+      <div className="flex items-center bg-white border-y border-r border-gray-300 rounded-r-lg">
         <input
           type="file"
           style={{ display: "none" }}
           id="file"
           onChange={(e) => setImg(e.target.files[0])}
         />
-        <label htmlFor="file">
-          <img src={Img} alt="" />
+        <label
+          htmlFor="file"
+          className="p-2 cursor-pointer hover:bg-gray-100 transition duration-300 rounded-l-lg"
+        >
+          <img
+            src={Img}
+            alt="Attach"
+            className="w-6 h-6 text-gray-600 hover:text-blue-500"
+          />
         </label>
-        <button onClick={handleSend}>
-          <img src={send} alt="" />
+        <button
+          onClick={handleSend}
+          className="p-2 bg-blue-500 text-white rounded-r-lg hover:bg-blue-600 transition duration-300 flex items-center justify-center"
+        >
+          <img src={send} alt="Send" className="w-6 h-6" />
         </button>
       </div>
     </div>
