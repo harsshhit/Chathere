@@ -66,9 +66,6 @@ const Message = ({ message }) => {
           alt="avatar"
           className="w-8 h-8 rounded-full object-cover"
         />
-        <span className="text-xs text-gray-500">
-          {formatDate(message.date)}
-        </span>
       </div>
 
       <div
@@ -76,17 +73,26 @@ const Message = ({ message }) => {
           message.senderId === currentUser.uid ? "items-end" : "items-start"
         }`}
       >
-        {message.text && (
-          <p
-            className={`py-2 px-4 rounded-2xl ${
-              message.senderId === currentUser.uid
-                ? "bg-blue-500 text-white rounded-br-none"
-                : "bg-white text-gray-800 rounded-bl-none"
-            } shadow-md`}
-          >
-            {message.text}
-          </p>
-        )}
+        <div className="flex flex-col gap-1">
+          {message.text && (
+            <div className="relative">
+              <p
+                className={`py-2 px-4 pb-5 rounded-2xl ${
+                  message.senderId === currentUser.uid
+                    ? "bg-blue-500 text-white rounded-br-none"
+                    : "bg-white text-gray-800 rounded-bl-none"
+                } shadow-md`}
+              >
+                {message.text}
+                <span className={`absolute bottom-1 ${
+                  message.senderId === currentUser.uid ? "right-2" : "left-2"
+                } text-[10px] text-gray-300`}>
+                  {formatDate(message.date)}
+                </span>
+              </p>
+            </div>
+          )}
+        </div>
 
         {message.img && (
           <motion.div
@@ -121,6 +127,11 @@ const Message = ({ message }) => {
               `}
               layoutId={`message-image-${message.id}`}
             />
+            <span className={`absolute bottom-2 ${
+              message.senderId === currentUser.uid ? "right-2" : "left-2"
+            } text-[10px] text-white bg-black/50 px-2 py-1 rounded`}>
+              {formatDate(message.date)}
+            </span>
             {isExpanded && (
               <motion.button
                 initial={{ opacity: 0 }}
@@ -129,7 +140,7 @@ const Message = ({ message }) => {
                 onClick={handleDownload}
                 disabled={isDownloading}
                 className={`
-                  absolute bottom-4 right-4 p-3
+                  absolute bottom-4 left-4 p-3
                   ${
                     isDownloading
                       ? "bg-gray-400/80"
