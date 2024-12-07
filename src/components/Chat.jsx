@@ -24,7 +24,7 @@ const Chat = () => {
       <motion.div
         initial={{ y: -20 }}
         animate={{ y: 0 }}
-        className="bg-white shadow-lg border-b border-blue-100 p-4 flex items-center justify-between sticky top-0 z-10 rounded-t-2xl backdrop-blur-sm bg-opacity-90"
+        className="bg-white shadow-lg border-b border-blue-100 p-4 flex items-center justify-between sticky top-0  rounded-t-2xl backdrop-blur-sm bg-opacity-90"
       >
         <div className="flex items-center space-x-4">
           <motion.button

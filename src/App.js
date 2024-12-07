@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 // import "./style.scss";
 import "./index.css";
 import { UIProvider } from "./context/UIContext";
+import Profile from "./pages/Profile"
 
 const App = () => {
   const { currentUser } = useContext(AuthContext);
@@ -28,6 +29,11 @@ const App = () => {
           />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
+          <Route path="profile" element={
+            <ProtectedRoute>
+              <Profile />
+            </ProtectedRoute>
+          } />
         </Routes>
       </BrowserRouter>
     </UIProvider>

@@ -25,12 +25,10 @@ const Message = ({ message }) => {
     setIsDownloading(true);
 
     try {
-      // Get the image URL from Firebase Storage
       const storage = getStorage();
       const imageRef = storageRef(storage, message.img);
       const url = await getDownloadURL(imageRef);
 
-      // Create a temporary anchor element
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute(
@@ -50,13 +48,19 @@ const Message = ({ message }) => {
   };
 
   return (
-    <div
+    <motion.div
       ref={ref}
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.3 }}
       className={`flex ${
         message.senderId === currentUser.uid ? "flex-row-reverse" : "flex-row"
       } gap-4 items-end mb-6`}
     >
-      <div className="flex flex-col gap-1">
+      <motion.div 
+        whileHover={{ scale: 1.1 }}
+        className="flex flex-col gap-1"
+      >
         <img
           src={
             message.senderId === currentUser.uid
@@ -64,9 +68,9 @@ const Message = ({ message }) => {
               : data.user.photoURL
           }
           alt="avatar"
-          className="w-8 h-8 rounded-full object-cover"
+          className="w-8 h-8 rounded-full object-cover ring-2 ring-white shadow-lg"
         />
-      </div>
+      </motion.div>
 
       <div
         className={`flex flex-col gap-2 max-w-[80%] ${
@@ -75,29 +79,38 @@ const Message = ({ message }) => {
       >
         <div className="flex flex-col gap-1">
           {message.text && (
-            <div className="relative">
+            <motion.div 
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              className="relative"
+            >
               <p
-                className={`py-2 px-4 pb-5 rounded-2xl ${
-                  message.senderId === currentUser.uid
-                    ? "bg-blue-500 text-white rounded-br-none"
-                    : "bg-white text-gray-800 rounded-bl-none"
-                } shadow-md`}
+                className={`py-2 px-4 pb-5 rounded-2xl backdrop-blur-sm
+                  ${
+                    message.senderId === currentUser.uid
+                      ? "bg-gradient-to-br from-blue-400 to-blue-600 text-white rounded-br-none"
+                      : "bg-gradient-to-br from-gray-50 to-white text-gray-800 rounded-bl-none"
+                  } 
+                  shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300
+                  border border-white/20`}
               >
                 {message.text}
-                <span className={`absolute bottom-1 ${
-                  message.senderId === currentUser.uid ? "right-2" : "left-2"
-                } text-[10px] text-gray-300`}>
+                <span
+                  className={`absolute bottom-1 ${
+                    message.senderId === currentUser.uid ? "right-2" : "left-2"
+                  } text-[10px] ${message.senderId === currentUser.uid ? "text-blue-100" : "text-gray-400"}`}
+                >
                   {formatDate(message.date)}
                 </span>
               </p>
-            </div>
+            </motion.div>
           )}
         </div>
 
         {message.img && (
           <motion.div
             layout
-            className={`relative ${isExpanded ? "w-full" : "w-auto "}`}
+            className={`relative ${isExpanded ? "w-full" : "w-auto"}`}
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{
               opacity: 1,
@@ -111,14 +124,16 @@ const Message = ({ message }) => {
               alt="message"
               onClick={handleImageClick}
               className={`
-                rounded-lg cursor-pointer shadow-lg
+                rounded-xl cursor-pointer
                 transition-all duration-300
                 ${
                   isExpanded
                     ? "w-full h-[60vh] object-contain"
-                    : " max-h-[40vh] object-cover max-+h-[30vh] w-auto"
+                    : "max-h-[40vh] object-cover w-auto"
                 }
-                hover:shadow-xl
+                shadow-[0_8px_30px_rgb(0,0,0,0.12)]
+                hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)]
+                border-2 border-white/50
                 ${
                   message.senderId === currentUser.uid
                     ? "hover:brightness-95"
@@ -126,16 +141,19 @@ const Message = ({ message }) => {
                 }
               `}
               layoutId={`message-image-${message.id}`}
+              whileHover={{ scale: 1.02 }}
             />
-            <span className={`absolute bottom-2 ${
-              message.senderId === currentUser.uid ? "right-2" : "left-2"
-            } text-[10px] text-white bg-black/50 px-2 py-1 rounded`}>
+            <span
+              className={`absolute bottom-2 ${
+                message.senderId === currentUser.uid ? "right-2" : "left-2"
+              } text-[10px] text-white bg-black/50 backdrop-blur-md px-2 py-1 rounded-full`}
+            >
               {formatDate(message.date)}
             </span>
             {isExpanded && (
               <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
                 onClick={handleDownload}
                 disabled={isDownloading}
@@ -144,18 +162,20 @@ const Message = ({ message }) => {
                   ${
                     isDownloading
                       ? "bg-gray-400/80"
-                      : "bg-white/80 hover:bg-white/90"
+                      : "bg-gradient-to-r from-white/80 to-gray-100/80 hover:from-white/90 hover:to-gray-100/90"
                   }
                   backdrop-blur-md
                   text-gray-800 rounded-full
                   shadow-[0_8px_30px_rgb(0,0,0,0.12)]
-                  border border-gray-200
+                  border border-white/50
                   transition-all duration-300 
                   hover:scale-110 hover:shadow-[0_8px_30px_rgb(0,0,0,0.2)]
                   disabled:cursor-not-allowed
                   disabled:opacity-50
                   group
                 `}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.95 }}
               >
                 <Download
                   size={20}
@@ -170,7 +190,7 @@ const Message = ({ message }) => {
           </motion.div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 };
 

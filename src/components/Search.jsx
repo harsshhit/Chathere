@@ -86,10 +86,7 @@ const Search = () => {
 
   return (
     <div className="p-2  border-b border-blue-100 shadow-sm">
-      <div className="relative mb-6">
-        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-          <SearchIcon className="text-blue-400 w-6 h-6" />
-        </div>
+      <div className=" mb-6">
         <input
           type="text"
           placeholder="Search for a user... (e.g., Harshit)"

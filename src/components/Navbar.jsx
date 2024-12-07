@@ -3,14 +3,19 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { MoreVertical } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const Navbar = () => {
   const { currentUser } = useContext(AuthContext);
   const [showDropdown, setShowDropdown] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <div className="bg-white border-b py-4 px-6 flex items-center justify-between shadow-sm">
-      <h1 className="text-2xl font-bold text-blue-600 tracking-tight">
+      <h1
+        onClick={() => navigate("/")}
+        className="text-2xl font-bold text-blue-600 tracking-tight cursor-pointer hover:text-blue-700 transition-colors duration-300"
+      >
         ChatHere
       </h1>
 
@@ -18,7 +23,15 @@ const Navbar = () => {
         <img
           src={currentUser.photoURL}
           alt="User Avatar"
-          className="w-10 h-10 rounded-full object-cover border-2 border-purple-200"
+          onClick={() => navigate("/profile")}
+          className="w-10 h-10 rounded-full object-cover 
+            border-2 border-purple-200/80 hover:border-purple-300
+            shadow-lg hover:shadow-xl
+            transform hover:scale-105 hover:-rotate-3
+            transition-all duration-300 ease-out
+            bg-gradient-to-br from-white to-purple-50
+            hover:translate-y-[-2px]
+            cursor-pointer"
         />
 
         <div className="relative">
