@@ -78,6 +78,7 @@ const Register = () => {
 
       // Check if user already exists
       const userDoc = await getDoc(doc(db, "users", user.uid));
+      const userChatsDoc = await getDoc(doc(db, "userChats", user.uid));
       
       if (!userDoc.exists()) {
         // Create new user document
@@ -87,8 +88,10 @@ const Register = () => {
           email: user.email,
           photoURL: user.photoURL,
         });
+      }
 
-        // Create empty user chats
+      // Create userChats document if it doesn't exist
+      if (!userChatsDoc.exists()) {
         await setDoc(doc(db, "userChats", user.uid), {});
       }
 
