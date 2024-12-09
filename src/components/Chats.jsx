@@ -83,7 +83,10 @@ const Chats = () => {
                 </div>
 
                 {chat[1].lastMessage && (
-                  <p className="text-base text-blue-700 truncate font-medium">
+                  <p className="text-base text-blue-700 truncate font-medium flex items-center">
+                    {chat[1].lastMessage.senderId === currentUser.uid && (
+                      <span className="text-blue-500 mr-1">You: </span>
+                    )}
                     {chat[1].lastMessage.text}
                   </p>
                 )}

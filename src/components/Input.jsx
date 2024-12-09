@@ -120,6 +120,23 @@ const Input = () => {
             date: Timestamp.now(),
           }),
         });
+
+        await Promise.all([
+          updateDoc(doc(db, "userChats", currentUser.uid), {
+            [data.chatId + ".lastMessage"]: {
+              text,
+            },
+            [data.chatId + ".date"]: serverTimestamp(),
+          }),
+          updateDoc(doc(db, "userChats", data.user.uid), {
+            [data.chatId + ".lastMessage"]: {
+              text,
+            },
+            [data.chatId + ".date"]: serverTimestamp(),
+          }),
+        ]);
+
+        setText("");
         setIsLoading(false);
       }
     } catch (error) {

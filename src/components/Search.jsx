@@ -127,38 +127,43 @@ const Search = () => {
       </div>
 
       {loading && (
-        <div className="text-center py-4 text-blue-500">
+        <div className="text-center py-2 text-blue-500">
           Searching...
         </div>
       )}
 
       {err && username && !loading && (
-        <div className="text-red-500 text-center mb-4 animate-pulse font-semibold bg-red-50 py-3 rounded-full border border-red-200">
+        <div className="text-red-500 text-center py-2">
           No users found matching "{username}"
         </div>
       )}
 
-      <div className="space-y-3">
+      <ul className="divide-y divide-gray-100">
         {users.map((user) => (
-          <div
+          <li
             key={user.uid}
             onClick={() => handleSelect(user)}
-            className="flex items-center p-4 bg-white rounded-2xl cursor-pointer hover:bg-blue-50 transition duration-300 group border-2 border-blue-100 hover:border-blue-300 shadow-sm hover:shadow-md"
+            className="flex items-center py-2 px-1 hover:bg-gray-50 cursor-pointer"
           >
             <img
               src={user.photoURL}
               alt={user.displayName}
-              className="w-12 h-12 rounded-full object-cover mr-4 border-4 border-blue-200 group-hover:border-blue-300 group-hover:scale-105 transition duration-300 shadow-md"
+              className="w-8 h-8 rounded-full object-cover mr-3"
             />
             <div className="flex-grow">
-              <span className="font-bold text-lg text-gray-800 group-hover:text-blue-700 transition duration-300">
+              <span className="text-gray-700">
                 {user.displayName}
               </span>
+              {user.bio && (
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Bio: {user.bio}
+                </p>
+              )}
             </div>
-            <User className="text-blue-500 w-5 h-5 group-hover:translate-x-1 transition duration-300" />
-          </div>
+            <User className="text-gray-400 w-4 h-4" />
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 };

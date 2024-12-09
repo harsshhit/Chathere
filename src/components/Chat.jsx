@@ -1,18 +1,37 @@
-import React, { useContext } from "react";
-import { ArrowLeftCircle, PhoneCall, Video, Settings2 } from "lucide-react";
-import { motion } from "framer-motion";
+import React, { useContext, useState, useEffect } from "react";
+import { ArrowLeftCircle, PhoneCall, Video, Settings2, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { doc, getDoc } from "firebase/firestore";
 import Messages from "./Messages";
 import Input from "./Input";
 import { ChatContext } from "../context/ChatContext";
 import { useUI } from "../context/UIContext";
+import { db } from "../firebase";
 
 const Chat = () => {
   const { data } = useContext(ChatContext);
   const { setIsMobileView } = useUI();
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [userDetails, setUserDetails] = useState(null);
 
   const handleBack = () => {
     setIsMobileView(true);
   };
+
+  useEffect(() => {
+    const fetchUserDetails = async () => {
+      if (data.user?.uid) {
+        const userDoc = await getDoc(doc(db, "users", data.user.uid));
+        if (userDoc.exists()) {
+          setUserDetails(userDoc.data());
+        }
+      }
+    };
+
+    if (showUserModal) {
+      fetchUserDetails();
+    }
+  }, [showUserModal, data.user?.uid]);
 
   return (
     <motion.div
@@ -44,16 +63,20 @@ const Chat = () => {
                 whileHover={{ scale: 1.05 }}
                 src={data.user?.photoURL}
                 alt={data.user?.displayName}
-                className="w-12 h-12 rounded-full object-cover border-2 border-blue-200 shadow-md hover:border-blue-300 transition-all duration-200"
+                className="w-12 h-12 rounded-full object-cover border-2 border-blue-200 shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer"
+                onClick={() => setShowUserModal(true)}
               />
-              <span className="font-bold text-gray-800 text-lg line-clamp-1 hover:text-blue-600 transition-colors duration-200">
+              <span 
+                className="font-bold text-gray-800 text-lg line-clamp-1 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+                onClick={() => setShowUserModal(true)}
+              >
                 {data.user?.displayName}
               </span>
             </div>
           )}
         </div>
 
-        <div className="flex items-center space-x-2 md:space-x-3">
+        {/* <div className="flex items-center space-x-2 md:space-x-3">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -75,8 +98,57 @@ const Chat = () => {
           >
             <Settings2 className="w-6 h-6 text-blue-600 group-hover:text-blue-700 transition-colors duration-200" />
           </motion.button>
-        </div>
+        </div> */}
       </motion.div>
+
+      <AnimatePresence>
+        {showUserModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+            onClick={() => setShowUserModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-lg relative border border-gray-200"
+              onClick={e => e.stopPropagation()}
+            >
+              <button 
+                className="absolute top-4 right-4 text-gray-600 hover:text-gray-800 transition-colors duration-200"
+                onClick={() => setShowUserModal(false)}
+              >
+                <X size={24} />
+              </button>
+              <div className="flex flex-col items-center space-y-6">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-blue-200 rounded-full blur-md opacity-20 animate-pulse"></div>
+                  <motion.img
+                    whileHover={{ scale: 1.05 }}
+                    src={data.user?.photoURL}
+                    alt={data.user?.displayName}
+                    className="relative w-32 h-32 rounded-full object-cover border-4 border-blue-100 shadow-md ring-2 ring-blue-200"
+                  />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800">
+                  {data.user?.displayName}
+                </h2>
+                <div className="space-y-3 text-center w-full px-4">
+                  <p className="text-gray-700 bg-blue-50 py-2 px-4 rounded-lg">
+                    {data.user?.email}
+                  </p>
+                  <p className="text-gray-600 bg-gray-50 py-3 px-4 rounded-lg">
+                    {userDetails?.bio || "No bio available"}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {data.chatId ? (
         <>

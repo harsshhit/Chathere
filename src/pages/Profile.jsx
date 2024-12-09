@@ -2,7 +2,7 @@ import React, { useContext, useRef, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
 import { motion } from "framer-motion";
-import { Mail, Calendar, Edit2 } from "lucide-react";
+import { Mail, Calendar, Edit2, LogOut } from "lucide-react";
 import {
   getStorage,
   ref,
@@ -12,6 +12,9 @@ import {
 import { updateProfile } from "firebase/auth";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { signOut } from "firebase/auth";
+import { auth } from "../firebase";
+import { useNavigate } from "react-router-dom";
 
 const Profile = () => {
   const { currentUser } = useContext(AuthContext);
@@ -21,6 +24,7 @@ const Profile = () => {
   const [newDisplayName, setNewDisplayName] = useState(currentUser.displayName);
   const [bio, setBio] = useState("");
   const [newBio, setNewBio] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchBio = async () => {
@@ -106,6 +110,15 @@ const Profile = () => {
       setIsEditingBio(false);
     } catch (error) {
       console.error("Error updating bio:", error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate("/login");
+    } catch (error) {
+      console.error("Error logging out:", error);
     }
   };
 
@@ -234,6 +247,17 @@ const Profile = () => {
                     })}
                   </p>
                 </div>
+              </div>
+
+              {/* Logout Button */}
+              <div className="text-center pt-6">
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center justify-center space-x-2 mx-auto px-4 py-2 text-gray-600 hover:text-red-600 transition-colors duration-200"
+                >
+                  <LogOut size={16} />
+                  <span>Logout</span>
+                </button>
               </div>
             </div>
           </div>

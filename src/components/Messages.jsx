@@ -3,21 +3,45 @@ import React, { useContext, useEffect, useState, useRef } from "react";
 import { ChatContext } from "../context/ChatContext";
 import { db } from "../firebase";
 import Message from "./Message";
+import { showNotification, requestNotificationPermission } from "../utils/notifications";
 
 const Messages = () => {
   const [messages, setMessages] = useState([]);
   const { data } = useContext(ChatContext);
   const messagesEndRef = useRef(null);
+  const previousMessagesLength = useRef(0);
 
   useEffect(() => {
+    // Request notification permission when component mounts
+    requestNotificationPermission();
+
     const unSub = onSnapshot(doc(db, "chats", data.chatId), (doc) => {
-      doc.exists() && setMessages(doc.data().messages);
+      if (doc.exists()) {
+        const newMessages = doc.data().messages;
+        setMessages(newMessages);
+
+        // Check if there's a new message and we're not focused on the window
+        if (newMessages.length > previousMessagesLength.current && !document.hasFocus()) {
+          const latestMessage = newMessages[newMessages.length - 1];
+          if (latestMessage.senderId !== data.user.uid) {
+            showNotification(
+              data.user.displayName || "New Message",
+              {
+                body: latestMessage.text || "New message received",
+                tag: "new-message",
+                renotify: true,
+              }
+            );
+          }
+        }
+        previousMessagesLength.current = newMessages.length;
+      }
     });
 
     return () => {
       unSub();
     };
-  }, [data.chatId]);
+  }, [data.chatId, data.user.uid, data.user.displayName]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

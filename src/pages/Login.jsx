@@ -1,9 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
-import { auth, googleProvider, db } from "../firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../firebase";
 import { Lock, Mail } from "lucide-react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const Login = () => {
   const [err, setErr] = useState(false);
@@ -19,37 +18,6 @@ const Login = () => {
       await signInWithEmailAndPassword(auth, email, password);
       navigate("/");
     } catch (err) {
-      setErr(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    try {
-      setLoading(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-
-      // Check if user exists in Firestore
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      
-      if (!userDoc.exists()) {
-        // Create new user document if it doesn't exist
-        await setDoc(doc(db, "users", user.uid), {
-          uid: user.uid,
-          displayName: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL,
-        });
-
-        // Create empty user chats
-        await setDoc(doc(db, "userChats", user.uid), {});
-      }
-
-      navigate("/");
-    } catch (error) {
-      console.error(error);
       setErr(true);
     } finally {
       setLoading(false);
@@ -103,22 +71,21 @@ const Login = () => {
             <div className="w-full border-t border-gray-300"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-white text-gray-500">Or continue with</span>
+            <span className="px-2 bg-white text-gray-500">Or</span>
           </div>
         </div>
 
-        <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
+        <Link
+          to="/register"
           className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 text-gray-700 py-3 rounded-lg hover:bg-gray-50 transition duration-300 shadow-sm"
         >
-          <img 
-            src="https://www.google.com/favicon.ico" 
-            alt="Google" 
+          <img
+            src="https://www.google.com/favicon.ico"
+            alt="Google"
             className="w-5 h-5"
           />
-          Sign in with Google
-        </button>
+         Sign in with Google
+        </Link>
 
         {err && (
           <p className="text-red-500 text-center animate-pulse">
