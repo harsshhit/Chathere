@@ -4,6 +4,6 @@
 
 @layer base {
   * {
-    font-family: 'Dancing Script', cursive;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 }
