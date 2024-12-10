@@ -159,10 +159,10 @@ const Input = () => {
     <motion.div
       initial={{ y: 20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="flex flex-col bg-gradient-to-br from-blue-50 via-white to-blue-50 p-2 sm:p-3 md:p-4 relative shadow-lg rounded-xl"
+      className="flex flex-col bg-gradient-to-br from-blue-50 to-indigo-50 p-2 sm:p-3 md:p-4 relative"
     >
       {imgPreview && (
-        <motion.div 
+        <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="mb-1 sm:mb-3 md:mb-4 relative inline-block"

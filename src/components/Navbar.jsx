@@ -7,7 +7,7 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="bg-white border-b py-4 px-6 flex items-center justify-between shadow-sm">
+    <div className="bg-gradient-to-br min-h-[10vh] from-blue-50 to-indigo-50 border-b py-4 px-6 flex items-center justify-between shadow-sm">
       <h1
         onClick={() => navigate("/")}
         className="text-2xl font-bold text-blue-600 tracking-wider cursor-pointer hover:text-blue-700 
@@ -20,7 +20,7 @@ const Navbar = () => {
         <span className="text-gray-700 font-medium">
           {currentUser.displayName}
         </span>
-        
+
         <img
           src={currentUser.photoURL}
           alt="User Avatar"

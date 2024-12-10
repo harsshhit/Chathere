@@ -112,7 +112,7 @@ const Search = () => {
   };
 
   return (
-    <div className="p-3 border-b border-blue-100 shadow-sm">
+    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-3 border-b border-blue-100 shadow-sm">
       <div className="relative mb-4">
         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
           <SearchIcon className="text-blue-400 w-5 h-5" />
@@ -127,9 +127,7 @@ const Search = () => {
       </div>
 
       {loading && (
-        <div className="text-center py-2 text-blue-500">
-          Searching...
-        </div>
+        <div className="text-center py-2 text-blue-500">Searching...</div>
       )}
 
       {err && username && !loading && (
@@ -151,13 +149,9 @@ const Search = () => {
               className="w-8 h-8 rounded-full object-cover mr-3"
             />
             <div className="flex-grow">
-              <span className="text-gray-700">
-                {user.displayName}
-              </span>
+              <span className="text-gray-700">{user.displayName}</span>
               {user.bio && (
-                <p className="text-sm text-gray-500 mt-0.5">
-                  Bio: {user.bio}
-                </p>
+                <p className="text-sm text-gray-500 mt-0.5">Bio: {user.bio}</p>
               )}
             </div>
             <User className="text-gray-400 w-4 h-4" />

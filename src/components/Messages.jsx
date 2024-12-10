@@ -53,20 +53,27 @@ const Messages = () => {
 
   return (
     <div
-      className="bg-blue-50 h-[calc(100vh-130px)] md:h-[calc(100vh-160px)] overflow-y-auto p-6 space-y-6 
-      scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100 
-      shadow-inner border border-blue-100 rounded-lg"
+      className="bg-gradient-to-br from-blue-50 to-indigo-50 h-[calc(100vh-130px)] md:h-[calc(100vh-160px)] 
+        overflow-y-auto p-6 space-y-6 
+        scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100 
+        shadow-[inset_0_2px_15px_rgba(0,0,0,0.1)] 
+        border border-blue-100/50 rounded-2xl
+        backdrop-blur-sm backdrop-filter"
     >
       {messages.length === 0 ? (
-        <div className="text-center text-gray-600 py-12 px-4  bg-opacity-60  rounded-xl   ">
-          <p className="text-xl "> Start chatting!</p>
+        <div className="text-center ">
+          <p className="text-xl  bg-gradient-to-r from-blue-600 to-indigo-600 
+            bg-clip-text text-transparent ">
+            Start chatting!
+          </p>
         </div>
       ) : (
         messages.map((m, index) => (
           <div
             key={m.id || index}
-            className="transition-all duration-300 ease-in-out  
-              rounded-lg hover:-translate-y-0.5"
+            className=" 
+              rounded-xl
+             "
           >
             <Message message={m} />
           </div>

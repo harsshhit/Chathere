@@ -43,9 +43,9 @@ const Chat = () => {
       <motion.div
         initial={{ y: -20 }}
         animate={{ y: 0 }}
-        className="bg-white shadow-lg border-b border-blue-100 p-4 flex items-center justify-between sticky top-0  rounded-t-2xl backdrop-blur-sm bg-opacity-90"
+        className="bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[10vh]    p-4 flex items-center justify-between sticky top-0  "
       >
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-4 ">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -66,7 +66,7 @@ const Chat = () => {
                 className="w-12 h-12 rounded-full object-cover border-2 border-blue-200 shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer"
                 onClick={() => setShowUserModal(true)}
               />
-              <span 
+              <span
                 className="font-bold text-gray-800 text-lg line-clamp-1 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
                 onClick={() => setShowUserModal(true)}
               >
@@ -115,9 +115,9 @@ const Chat = () => {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-lg relative border border-gray-200"
-              onClick={e => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
             >
-              <button 
+              <button
                 className="absolute top-4 right-4 text-gray-600 hover:text-gray-800 transition-colors duration-200"
                 onClick={() => setShowUserModal(false)}
               >
