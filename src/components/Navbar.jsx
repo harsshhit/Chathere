@@ -1,41 +1,77 @@
-import React, { useContext } from "react";
+import React, { useContext, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import Avatar from "./Avatar";
+import { Users } from "lucide-react";
+import CreateGroup from "./CreateGroup";
 
 const Navbar = () => {
   const { currentUser } = useContext(AuthContext);
   const navigate = useNavigate();
+  const [showGroupModal, setShowGroupModal] = useState(false);
 
   return (
-    <div className="bg-gradient-to-br min-h-[10vh] from-blue-50 to-indigo-50 border-b py-4 px-6 flex items-center justify-between shadow-sm">
-      <h1
+    <>
+      <div
+        className="px-4 py-3 flex items-center justify-between"
+      style={{
+        background: "var(--surface-2)",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      {/* Brand */}
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
         onClick={() => navigate("/")}
-        className="text-2xl font-bold text-blue-600 tracking-wider cursor-pointer hover:text-blue-700 
-          transition-colors duration-300 font-righteous"
       >
-        ChatHere
-      </h1>
+        <span className="brand-logo text-xl">Quawk</span>
+      </motion.button>
 
-      <div className="flex items-center space-x-4">
-        <span className="text-gray-700 font-medium">
-          {currentUser.displayName}
-        </span>
+      {/* Right side actions */}
+      <div className="flex items-center gap-2">
+        {/* Create group button */}
+        <button
+          onClick={() => setShowGroupModal(true)}
+          className="icon-btn flex-shrink-0"
+          title="New Group"
+        >
+          <Users size={18} />
+        </button>
 
-        <img
-          src={currentUser.photoURL}
-          alt="User Avatar"
+        {/* User info */}
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
           onClick={() => navigate("/profile")}
-          className="w-10 h-10 rounded-full object-cover 
-            border-2 border-purple-200/80 hover:border-purple-300
-            shadow-lg hover:shadow-xl
-            transform hover:scale-105 hover:-rotate-3
-            transition-all duration-300 ease-out
-            bg-gradient-to-br from-white to-purple-50
-            hover:translate-y-[-2px]
-            cursor-pointer"
-        />
+          className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200"
+          style={{ background: "rgba(255,255,255,0.03)" }}
+          title="View profile"
+        >
+          <span
+            className="text-sm font-medium max-w-[100px] truncate hidden sm:block"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            {currentUser?.displayName}
+          </span>
+          <Avatar
+            src={currentUser?.photoURL}
+            alt={currentUser?.displayName}
+            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+            style={{
+              border: "2px solid rgba(99,102,241,0.5)",
+              boxShadow: "0 2px 12px rgba(99,102,241,0.25)",
+            }}
+          />
+        </motion.button>
       </div>
     </div>
+
+    <AnimatePresence>
+      {showGroupModal && <CreateGroup onClose={() => setShowGroupModal(false)} />}
+    </AnimatePresence>
+    </>
   );
 };
 

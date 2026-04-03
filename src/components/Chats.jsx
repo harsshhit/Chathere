@@ -1,13 +1,17 @@
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import React, { useContext, useEffect, useState } from "react";
-import { Clock, MessageCircle } from "lucide-react";
+import { MessageCircle, Archive, ArchiveRestore, ChevronLeft } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import { db } from "../firebase";
 import { useUI } from "../context/UIContext";
+import { motion, AnimatePresence } from "framer-motion";
+import Avatar from "./Avatar";
 
 const Chats = () => {
   const [chats, setChats] = useState({});
+  const [activeChat, setActiveChat] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
@@ -18,97 +22,185 @@ const Chats = () => {
       const unsub = onSnapshot(doc(db, "userChats", currentUser.uid), (doc) => {
         setChats(doc.data());
       });
-
-      return () => {
-        unsub();
-      };
+      return () => unsub();
     };
-
     currentUser.uid && getChats();
   }, [currentUser.uid]);
 
-  const handleSelect = (u) => {
+  const handleSelect = (u, chatId) => {
     dispatch({ type: "CHANGE_USER", payload: u });
     setIsMobileView(false);
+    setActiveChat(chatId);
   };
 
-  // Function to format timestamp
+  const handleArchiveToggle = async (e, chatId, currentStatus) => {
+    e.stopPropagation();
+    try {
+      await updateDoc(doc(db, "userChats", currentUser.uid), {
+        [`${chatId}.isArchived`]: !currentStatus,
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
     const date = new Date(timestamp.seconds * 1000);
-    return date.toLocaleString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
+    const now = new Date();
+    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      return date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    } else if (diffDays === 1) {
+      return "Yesterday";
+    } else {
+      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
   };
 
-  return (
-    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 h-full overflow-y-auto shadow-inner">
-      <div className="divide-y divide-blue-200/50">
-        {Object.entries(chats || {})
-          .sort((a, b) => b[1].date - a[1].date)
-          .map((chat) => (
-            <div
-              key={chat[0]}
-              onClick={() => handleSelect(chat[1].userInfo)}
-              className="flex items-center px-6 py-4 hover:bg-white/70 active:bg-blue-100 
-                backdrop-blur-sm transition-all duration-500 cursor-pointer 
-                transform hover:scale-[1.02] hover:shadow-lg rounded-lg mx-2 my-1"
-            >
-              <img
-                src={chat[1].userInfo.photoURL}
-                alt={chat[1].userInfo.displayName}
-                className="w-14 h-14 rounded-full object-cover mr-4
-                  border-[3px] border-indigo-200 hover:border-indigo-400
-                  shadow-xl hover:shadow-2xl
-                  transition-all duration-500 ease-in-out
-                  transform hover:scale-110 hover:rotate-6
-                  ring-4 ring-white/50 hover:ring-indigo-200
-                  filter hover:brightness-110 "
-              />
+  const sortedChats = Object.entries(chats || {}).sort((a, b) => b[1].date - a[1].date);
+  const unarchivedChats = sortedChats.filter(([_, chat]) => !chat.isArchived);
+  const archivedChats = sortedChats.filter(([_, chat]) => chat.isArchived);
 
-              <div className="flex-1 min-w-0 group">
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="font-bold text-lg bg-gradient-to-r from-blue-900 to-indigo-800 
-                    bg-clip-text text-transparent group-hover:scale-105 transition-transform duration-300 truncate">
-                    {chat[1].userInfo.displayName}
-                  </span>
-                  {chat[1].date && (
-                    <span className="text-sm text-indigo-600 flex items-center flex-shrink-0 ml-2 
-                      font-medium backdrop-blur-sm px-2 py-1 rounded-full bg-white/30 
-                      group-hover:bg-white/50 transition-all duration-300">
-                      <Clock className="w-4 h-4 mr-1 text-indigo-500 animate-spin-slow" />
-                      {formatTimestamp(chat[1].date)}
+  const displayedChats = showArchived ? archivedChats : unarchivedChats;
+
+  return (
+    <div className="flex-1 overflow-y-auto py-2 flex flex-col" style={{ background: "var(--surface-2)" }}>
+      {showArchived && (
+        <div className="px-4 py-2 mb-2 flex items-center w-full" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+          <button 
+            onClick={() => setShowArchived(false)} 
+            className="flex items-center gap-2 text-sm font-medium transition-colors"
+            style={{ color: "var(--primary-light)" }}
+          >
+            <ChevronLeft size={16} /> Back to Chats
+          </button>
+        </div>
+      )}
+
+      {/* Archived Banner in normal view */}
+      {!showArchived && archivedChats.length > 0 && (
+        <div 
+          onClick={() => setShowArchived(true)}
+          className="flex items-center justify-between px-4 py-3 mx-2 mb-2 rounded-xl cursor-pointer transition-colors duration-200"
+          style={{ background: "rgba(255,255,255,0.03)" }}
+        >
+          <div className="flex items-center gap-3">
+            <Archive size={18} style={{ color: "var(--text-muted)" }} />
+            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Archived</span>
+          </div>
+          <span className="text-xs" style={{ color: "var(--primary-light)" }}>{archivedChats.length}</span>
+        </div>
+      )}
+
+      <AnimatePresence mode="wait">
+        {displayedChats.length === 0 ? (
+          <motion.div
+            key="empty-state"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex flex-col items-center justify-center flex-1 pt-12 px-6 text-center"
+          >
+            <div
+              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+              style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+            >
+              {showArchived ? (
+                <Archive size={28} style={{ color: "var(--text-muted)" }} />
+              ) : (
+                <MessageCircle size={28} style={{ color: "var(--text-muted)" }} />
+              )}
+            </div>
+            <p className="text-sm font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
+              {showArchived ? "No archived chats" : "No conversations yet"}
+            </p>
+            {!showArchived && (
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Search for someone above to start chatting
+              </p>
+            )}
+          </motion.div>
+        ) : (
+          <motion.div key="chat-list" className="space-y-0.5 px-2 pb-4">
+            {displayedChats.map(([chatId, chat], index) => (
+              <motion.div
+                key={chatId}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ delay: index * 0.04, duration: 0.3 }}
+                onClick={() => handleSelect(chat.userInfo, chatId)}
+                className="flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-all duration-200 group relative"
+                style={{
+                  background: activeChat === chatId ? "rgba(99,102,241,0.15)" : "transparent",
+                  borderLeft: activeChat === chatId ? "2px solid var(--primary)" : "2px solid transparent",
+                }}
+                whileHover={{
+                  backgroundColor: activeChat === chatId ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)",
+                }}
+              >
+                {/* Avatar */}
+                <div className="relative flex-shrink-0">
+                  <Avatar
+                    src={chat.userInfo.photoURL}
+                    alt={chat.userInfo.displayName}
+                    className="w-12 h-12 rounded-2xl"
+                    style={{
+                      border: "1.5px solid rgba(99,102,241,0.25)",
+                    }}
+                  />
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0 pr-6">
+                  <div className="flex justify-between items-baseline gap-2 mb-0.5">
+                    <span
+                      className="text-sm font-semibold truncate"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {chat.userInfo.displayName}
                     </span>
+                    {chat.date && (
+                      <span className="text-[10px] flex-shrink-0" style={{ color: "var(--text-muted)" }}>
+                        {formatTimestamp(chat.date)}
+                      </span>
+                    )}
+                  </div>
+
+                  {chat.lastMessage ? (
+                    <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                      {chat.lastMessage.senderId === currentUser.uid && (
+                        <span style={{ color: "var(--primary-light)" }}>You: </span>
+                      )}
+                      {chat.lastMessage.text || "Sent an image"}
+                    </p>
+                  ) : (
+                    <p className="text-xs" style={{ color: "var(--text-muted)" }}>Start a conversation</p>
                   )}
                 </div>
 
-                {chat[1].lastMessage && (
-                  <p className="text-base text-indigo-700 truncate font-medium flex items-center
-                    group-hover:translate-x-2 transition-transform duration-300">
-                    {chat[1].lastMessage.senderId === currentUser.uid && (
-                      <span className="text-indigo-500 mr-1 font-semibold">You: </span>
-                    )}
-                    {chat[1].lastMessage.text}
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
-      </div>
-
-      {Object.entries(chats || {}).length === 0 && (
-        <div className="text-center p-12 bg-white/30 backdrop-blur-sm rounded-xl m-4 
-          shadow-xl hover:shadow-2xl transition-all duration-500 hover:scale-105">
-          <MessageCircle className="mx-auto mb-6 w-24 h-24 text-indigo-400 
-            animate-bounce hover:animate-ping" />
-          <p className="text-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 
-            bg-clip-text text-transparent">
-            No chats yet. Start a conversation!
-          </p>
-        </div>
-      )}
+                {/* Archive Button */}
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <button
+                    onClick={(e) => handleArchiveToggle(e, chatId, chat.isArchived)}
+                    className="p-2 rounded-xl transition-all duration-200"
+                    style={{ 
+                      background: "rgba(0,0,0,0.5)", 
+                      backdropFilter: "blur(4px)",
+                      border: "1px solid rgba(255,255,255,0.1)"
+                    }}
+                    title={chat.isArchived ? "Unarchive chat" : "Archive chat"}
+                  >
+                    {chat.isArchived ? <ArchiveRestore size={16} className="text-white" /> : <Archive size={16} className="text-white" />}
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

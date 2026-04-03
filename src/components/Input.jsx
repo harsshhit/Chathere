@@ -13,7 +13,8 @@ import { db, storage } from "../firebase";
 import { v4 as uuid } from "uuid";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import EmojiPicker from "emoji-picker-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import GifPicker from "./GifPicker";
 
 const Input = () => {
   const [text, setText] = useState("");
@@ -21,21 +22,21 @@ const Input = () => {
   const [imgPreview, setImgPreview] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
-
   const MAX_FILE_SIZE = 5 * 1024 * 1024;
-
   const pickerRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (pickerRef.current && !pickerRef.current.contains(event.target)) {
         setShowEmojiPicker(false);
+        setShowGifPicker(false);
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
@@ -57,8 +58,36 @@ const Input = () => {
     setImgPreview(null);
   };
 
+  const updateUserChats = async (lastMsgText) => {
+    const promises = [];
+    if (data.user?.isGroup && data.user?.members) {
+      data.user.members.forEach((member) => {
+        promises.push(
+          updateDoc(doc(db, "userChats", member.uid), {
+            [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
+            [data.chatId + ".date"]: serverTimestamp(),
+          })
+        );
+      });
+    } else {
+      promises.push(
+        updateDoc(doc(db, "userChats", currentUser.uid), {
+          [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
+          [data.chatId + ".date"]: serverTimestamp(),
+        })
+      );
+      promises.push(
+        updateDoc(doc(db, "userChats", data.user.uid), {
+          [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
+          [data.chatId + ".date"]: serverTimestamp(),
+        })
+      );
+    }
+    return Promise.all(promises);
+  };
+
   const handleSend = async () => {
-    if (!text && !img) return;
+    if (!text.trim() && !img) return;
     setIsLoading(true);
 
     try {
@@ -66,241 +95,227 @@ const Input = () => {
         const storageRef = ref(storage, uuid());
         const uploadTask = uploadBytesResumable(storageRef, img);
 
-        uploadTask.on(
-          "state_changed",
-          null,
-          (error) => {
-            console.error("Error uploading image:", error);
+        uploadTask.on("state_changed", null, (error) => {
+          console.error("Upload error:", error);
+          setIsLoading(false);
+        }, async () => {
+          try {
+            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+            await updateDoc(doc(db, "chats", data.chatId), {
+              messages: arrayUnion({
+                id: uuid(),
+                text,
+                senderId: currentUser.uid,
+                senderName: currentUser.displayName,
+                senderPhoto: currentUser.photoURL,
+                date: Timestamp.now(),
+                img: downloadURL,
+              }),
+            });
+            await updateUserChats(text || "Sent an image");
+            setText("");
+            setImg(null);
+            setImgPreview(null);
+          } catch (err) {
+            console.error(err);
+          } finally {
             setIsLoading(false);
-          },
-          async () => {
-            try {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              await updateDoc(doc(db, "chats", data.chatId), {
-                messages: arrayUnion({
-                  id: uuid(),
-                  text,
-                  senderId: currentUser.uid,
-                  date: Timestamp.now(),
-                  img: downloadURL,
-                }),
-              });
-
-              await Promise.all([
-                updateDoc(doc(db, "userChats", currentUser.uid), {
-                  [data.chatId + ".lastMessage"]: {
-                    text: text || "Sent an image",
-                  },
-                  [data.chatId + ".date"]: serverTimestamp(),
-                }),
-                updateDoc(doc(db, "userChats", data.user.uid), {
-                  [data.chatId + ".lastMessage"]: {
-                    text: text || "Sent an image",
-                  },
-                  [data.chatId + ".date"]: serverTimestamp(),
-                }),
-              ]);
-
-              setText("");
-              setImg(null);
-              setImgPreview(null);
-            } catch (error) {
-              console.error("Error processing upload:", error);
-            } finally {
-              setIsLoading(false);
-            }
           }
-        );
+        });
       } else {
         await updateDoc(doc(db, "chats", data.chatId), {
           messages: arrayUnion({
             id: uuid(),
             text,
             senderId: currentUser.uid,
+            senderName: currentUser.displayName,
+            senderPhoto: currentUser.photoURL,
             date: Timestamp.now(),
           }),
         });
-
-        await Promise.all([
-          updateDoc(doc(db, "userChats", currentUser.uid), {
-            [data.chatId + ".lastMessage"]: {
-              text,
-            },
-            [data.chatId + ".date"]: serverTimestamp(),
-          }),
-          updateDoc(doc(db, "userChats", data.user.uid), {
-            [data.chatId + ".lastMessage"]: {
-              text,
-            },
-            [data.chatId + ".date"]: serverTimestamp(),
-          }),
-        ]);
-
+        await updateUserChats(text);
         setText("");
         setIsLoading(false);
       }
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("Error sending:", error);
       setIsLoading(false);
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === "Enter") {
+  const handleGifSend = async (gifUrl) => {
+    setShowGifPicker(false);
+    setIsLoading(true);
+
+    try {
+      await updateDoc(doc(db, "chats", data.chatId), {
+        messages: arrayUnion({
+          id: uuid(),
+          text,
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName,
+          senderPhoto: currentUser.photoURL,
+          date: Timestamp.now(),
+          img: gifUrl,
+        }),
+      });
+      await updateUserChats(text || "Sent a GIF");
+      setText("");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       handleSend();
     }
   };
 
   const onEmojiClick = (emojiObject) => {
-    setText((prevText) => prevText + emojiObject.emoji);
+    setText((prev) => prev + emojiObject.emoji);
+    inputRef.current?.focus();
   };
 
   return (
-    <motion.div
-      initial={{ y: 20, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      className="flex flex-col bg-gradient-to-br from-blue-50 to-indigo-50 p-2 sm:p-3 md:p-4 relative"
+    <div
+      className="px-3 py-3 sm:px-4 sm:py-3.5"
+      style={{ background: "var(--surface-2)" }}
     >
-      {imgPreview && (
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="mb-1 sm:mb-3 md:mb-4 relative inline-block"
-        >
-          <img
-            src={imgPreview}
-            alt="Preview"
-            className="max-h-24 sm:max-h-32 md:max-h-40 rounded-xl object-contain bg-gradient-to-br from-white to-blue-50 sm:p-1.5 md:p-2 shadow-md transform hover:scale-[1.02] transition-all duration-300"
-          />
-          <div className="absolute top-2 right-2 sm:top-2.5 md:top-3 sm:right-2.5 md:right-3 flex gap-1 sm:gap-1.5 md:gap-2">
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
+      {/* Image preview */}
+      <AnimatePresence>
+        {imgPreview && (
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            className="mb-3 relative inline-flex"
+          >
+            <img
+              src={imgPreview}
+              alt="Preview"
+              className="max-h-24 rounded-xl object-cover"
+              style={{ border: "1px solid var(--border-light)", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}
+            />
+            <button
               onClick={handleCancelImage}
-              className="p-1.5 sm:p-1.5 md:p-2 bg-gradient-to-br from-red-500 to-red-600 text-white rounded-full hover:from-red-600 hover:to-red-700 transition-all shadow-lg"
-              disabled={isLoading}
+              className="absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center transition-colors duration-200"
+              style={{ background: "#ef4444", color: "white", boxShadow: "0 2px 8px rgba(239,68,68,0.4)" }}
             >
-              <X size={14} className="sm:w-4 md:w-[16px] sm:h-4 md:h-[16px]" />
-            </motion.button>
-          </div>
-        </motion.div>
-      )}
+              <X size={12} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="flex items-center gap-1.5 sm:gap-2">
-        <div>
+      {/* Input row */}
+      <div className="flex items-center gap-2">
+        {/* Image upload */}
+        <div className="flex-shrink-0">
           <input
             type="file"
-            style={{ display: "none" }}
-            id="file"
+            id="chat-file"
+            className="hidden"
             onChange={handleImageChange}
             accept="image/*"
             disabled={isLoading}
           />
           <motion.label
-            whileHover={{
-              scale: 1.1,
-              rotateX: 10,
-              boxShadow: "0 10px 20px rgba(59, 130, 246, 0.2)",
-            }}
-            whileTap={{
-              scale: 0.9,
-              rotateX: 20,
-            }}
-            htmlFor="file"
-            className={`p-1.5 sm:p-2 cursor-pointer bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600
-              hover:from-blue-500 hover:via-blue-600 hover:to-blue-700
-              transition-all duration-300 rounded-full shadow-lg
-              group active:bg-blue-700 inline-block transform perspective-1000
-              ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+            htmlFor="chat-file"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="icon-btn cursor-pointer flex-shrink-0"
+            title="Attach image"
           >
-            <Image
-              className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-white group-hover:text-blue-100 group-hover:scale-110 
-              transition-all duration-300 drop-shadow-lg"
-            />
+            <Image size={20} />
           </motion.label>
         </div>
 
-        <div className="relative flex-grow flex items-center">
-          <div className="absolute left-2 z-10">
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="p-1.5 hover:bg-blue-100/50 rounded-full transition-all"
-              type="button"
-            >
-              <Smile className="w-5 h-5 text-blue-500 hover:text-blue-600" />
-            </motion.button>
+        {/* Text input + emoji */}
+        <div className="relative flex-1">
+          {/* Emoji toggle */}
+          <button
+            type="button"
+            onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
+            className="absolute left-4 top-1/2 -translate-y-1/2 z-10 transition-colors duration-200"
+            style={{ color: showEmojiPicker ? "var(--primary-light)" : "var(--text-muted)" }}
+          >
+            <Smile size={18} />
+          </button>
 
-            {showEmojiPicker && (
+          {/* Emoji & GIF pickers */}
+          <AnimatePresence>
+            {(showEmojiPicker || showGifPicker) && (
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
                 ref={pickerRef}
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
                 className="absolute bottom-full left-0 mb-2 z-50"
+                style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
               >
-                <div className="shadow-2xl rounded-lg backdrop-blur-sm">
+                {showEmojiPicker ? (
                   <EmojiPicker
                     onEmojiClick={onEmojiClick}
                     width={300}
-                    height={400}
+                    height={380}
+                    theme="dark"
+                    lazyLoadEmojis
                   />
-                </div>
+                ) : (
+                  <GifPicker onGifSelect={handleGifSend} />
+                )}
               </motion.div>
             )}
-          </div>
+          </AnimatePresence>
 
-          <motion.input
-            whileFocus={{ scale: 1.01 }}
+          <input
+            ref={inputRef}
             type="text"
-            placeholder="Type something..."
-            className="w-full pl-12 pr-4 sm:pr-5 md:pr-6 py-1.5 sm:py-2 text-blue-900 bg-gradient-to-r from-white to-blue-50/30 border-2 border-blue-200/50 rounded-full
-              focus:outline-none focus:ring-2 sm:focus:ring-4 focus:ring-blue-200/50 focus:border-blue-400/50
-              placeholder-blue-400 text-base sm:text-lg font-medium
-              transition-all duration-300 ease-in-out shadow-md backdrop-blur-sm"
-            onChange={(e) => setText(e.target.value)}
-            onKeyPress={handleKeyPress}
+            placeholder="Message…"
             value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
             disabled={isLoading}
+            className="chat-input !pl-11"
+            id="chat-message-input"
           />
         </div>
 
+        {/* GIF toggle */}
         <motion.button
-          whileHover={{ scale: 1.05, rotateX: 5 }}
-          whileTap={{ scale: 0.95, rotateX: 10 }}
+          type="button"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
+          className="icon-btn flex-shrink-0 cursor-pointer font-bold tracking-widest text-[11px]"
+          title="Send GIF"
+          style={{ width: "42px", height: "42px", color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)" }}
+        >
+          GIF
+        </motion.button>
+
+        {/* Send button */}
+        <motion.button
+          whileHover={(!text.trim() && !img) || isLoading ? {} : { scale: 1.05 }}
+          whileTap={(!text.trim() && !img) || isLoading ? {} : { scale: 0.95 }}
           onClick={handleSend}
-          disabled={(!text && !img) || isLoading}
-          className={`p-2 sm:p-2.5 md:p-3 rounded-full transition-all duration-300 
-            flex items-center justify-center group
-            shadow-[0_8px_16px_rgba(0,0,0,0.1)]
-            hover:shadow-[0_12px_20px_rgba(0,0,0,0.15)]
-            active:shadow-[0_4px_12px_rgba(0,0,0,0.2)]
-            ${
-              (!text && !img) || isLoading
-                ? "bg-gradient-to-br from-blue-700 via-blue-800 to-blue-900 cursor-not-allowed"
-                : "bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 hover:from-blue-500 hover:via-blue-600 hover:to-blue-700 active:from-blue-600 active:via-blue-700 active:to-blue-800"
-            } 
-            text-white transform hover:translate-y-[-2px]
-            before:absolute before:inset-0 before:rounded-full before:bg-white/20 before:opacity-0 hover:before:opacity-100 before:transition-opacity
-            border border-blue-400/30 backdrop-blur-sm`}
-          style={{
-            perspective: "1000px",
-            transformStyle: "preserve-3d",
-          }}
+          disabled={(!text.trim() && !img) || isLoading}
+          className="send-btn flex-shrink-0"
+          id="chat-send-btn"
         >
           {isLoading ? (
-            <Loader2 className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 animate-spin drop-shadow-lg" />
+            <Loader2 size={20} className="animate-spin" />
           ) : (
-            <Send
-              className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 
-              group-hover:scale-110 group-hover:rotate-12 
-              transition-all duration-300
-              drop-shadow-lg"
-            />
+            <Send size={18} className="ml-0.5" />
           )}
         </motion.button>
       </div>
-    </motion.div>
+    </div>
   );
 };
 

@@ -2,7 +2,6 @@ import React, { useContext, useState, useEffect } from "react";
 import {
   collection,
   query,
-  // where,
   getDocs,
   setDoc,
   doc,
@@ -10,20 +9,20 @@ import {
   serverTimestamp,
   getDoc,
 } from "firebase/firestore";
-import { Search as SearchIcon, User } from "lucide-react";
+import { Search as SearchIcon, UserPlus, Loader2, X } from "lucide-react";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
+import { motion, AnimatePresence } from "framer-motion";
+import Avatar from "./Avatar";
 
 const Search = () => {
   const [username, setUsername] = useState("");
-  // const [user, setUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [err, setErr] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
 
-  // Search users whenever username changes
   useEffect(() => {
     const searchUsers = async () => {
       if (!username.trim()) {
@@ -37,12 +36,14 @@ const Search = () => {
         const usersRef = collection(db, "users");
         const q = query(usersRef);
         const querySnapshot = await getDocs(q);
-        
+
         const searchResults = [];
         querySnapshot.forEach((doc) => {
           const userData = doc.data();
-          // Case insensitive search on displayName
-          if (userData.displayName.toLowerCase().includes(username.toLowerCase())) {
+          if (
+            userData.displayName.toLowerCase().includes(username.toLowerCase()) &&
+            userData.uid !== currentUser.uid
+          ) {
             searchResults.push(userData);
           }
         });
@@ -62,48 +63,39 @@ const Search = () => {
     }, 300);
 
     return () => clearTimeout(debounceTimer);
-  }, [username]);
+  }, [username, currentUser.uid]);
 
   const handleSelect = async (selectedUser) => {
     try {
-      const combinedId = 
-        currentUser.uid > selectedUser.uid 
-          ? currentUser.uid + selectedUser.uid 
+      const combinedId =
+        currentUser.uid > selectedUser.uid
+          ? currentUser.uid + selectedUser.uid
           : selectedUser.uid + currentUser.uid;
 
-      // Check if chat exists
       const chatDoc = await getDoc(doc(db, "chats", combinedId));
 
       if (!chatDoc.exists()) {
-        // Create chat document in chats collection
-        await setDoc(doc(db, "chats", combinedId), {
-          messages: []
-        });
+        await setDoc(doc(db, "chats", combinedId), { messages: [] });
 
-        // Update userChats for both users
-        const userChatsRef = doc(db, "userChats", currentUser.uid);
-        const otherUserChatsRef = doc(db, "userChats", selectedUser.uid);
-
-        await updateDoc(userChatsRef, {
+        await updateDoc(doc(db, "userChats", currentUser.uid), {
           [combinedId + ".userInfo"]: {
             uid: selectedUser.uid,
             displayName: selectedUser.displayName,
-            photoURL: selectedUser.photoURL
+            photoURL: selectedUser.photoURL,
           },
-          [combinedId + ".date"]: serverTimestamp()
+          [combinedId + ".date"]: serverTimestamp(),
         });
 
-        await updateDoc(otherUserChatsRef, {
+        await updateDoc(doc(db, "userChats", selectedUser.uid), {
           [combinedId + ".userInfo"]: {
             uid: currentUser.uid,
             displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL
+            photoURL: currentUser.photoURL,
           },
-          [combinedId + ".date"]: serverTimestamp()
+          [combinedId + ".date"]: serverTimestamp(),
         });
       }
 
-      // Reset search state
       setUsers([]);
       setUsername("");
     } catch (err) {
@@ -112,52 +104,97 @@ const Search = () => {
   };
 
   return (
-    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-3 border-b border-blue-100 shadow-sm">
-      <div className="relative mb-4">
-        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-          <SearchIcon className="text-blue-400 w-5 h-5" />
-        </div>
+    <div className="px-3 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+      {/* Search input */}
+      <div className="relative">
+        <SearchIcon
+          size={15}
+          className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ color: "var(--text-muted)" }}
+        />
         <input
           type="text"
-          placeholder="Search users by name..."
+          placeholder="Search people…"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          className="w-full pl-12 pr-6 py-3 border-2 border-blue-200 rounded-full focus:outline-none focus:ring-4 focus:ring-blue-100 focus:border-blue-400 transition duration-300 text-lg font-medium placeholder:text-blue-300 shadow-sm hover:shadow-md"
+          className="search-input"
+          id="search-users"
         />
+        {username && (
+          <button
+            onClick={() => { setUsername(""); setUsers([]); }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors duration-200"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
-      {loading && (
-        <div className="text-center py-2 text-blue-500">Searching...</div>
-      )}
-
-      {err && username && !loading && (
-        <div className="text-red-500 text-center py-2">
-          No users found matching "{username}"
-        </div>
-      )}
-
-      <ul className="divide-y divide-gray-100">
-        {users.map((user) => (
-          <li
-            key={user.uid}
-            onClick={() => handleSelect(user)}
-            className="flex items-center py-2 px-1 hover:bg-gray-50 cursor-pointer"
+      {/* Results */}
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex justify-center py-3"
           >
-            <img
-              src={user.photoURL}
-              alt={user.displayName}
-              className="w-8 h-8 rounded-full object-cover mr-3"
-            />
-            <div className="flex-grow">
-              <span className="text-gray-700">{user.displayName}</span>
-              {user.bio && (
-                <p className="text-sm text-gray-500 mt-0.5">Bio: {user.bio}</p>
-              )}
-            </div>
-            <User className="text-gray-400 w-4 h-4" />
-          </li>
-        ))}
-      </ul>
+            <Loader2 size={16} className="animate-spin" style={{ color: "var(--primary-light)" }} />
+          </motion.div>
+        )}
+
+        {err && username && !loading && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="text-xs text-center py-3"
+            style={{ color: "var(--text-muted)" }}
+          >
+            No users found for "{username}"
+          </motion.p>
+        )}
+
+        {users.length > 0 && (
+          <motion.ul
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mt-2 space-y-1"
+          >
+            {users.map((user) => (
+              <motion.li
+                key={user.uid}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                onClick={() => handleSelect(user)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 group"
+                style={{ background: "var(--surface-3)" }}
+                whileHover={{ backgroundColor: "rgba(99,102,241,0.12)" }}
+              >
+                <Avatar
+                  src={user.photoURL}
+                  alt={user.displayName}
+                  className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
+                  style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: "var(--text-primary)" }}>
+                    {user.displayName}
+                  </p>
+                  {user.bio && (
+                    <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
+                      {user.bio}
+                    </p>
+                  )}
+                </div>
+                <UserPlus size={15} style={{ color: "var(--primary-light)" }} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+              </motion.li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

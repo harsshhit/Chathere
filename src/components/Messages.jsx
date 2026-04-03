@@ -12,7 +12,6 @@ const Messages = () => {
   const previousMessagesLength = useRef(0);
 
   useEffect(() => {
-    // Request notification permission when component mounts
     requestNotificationPermission();
 
     const unSub = onSnapshot(doc(db, "chats", data.chatId), (doc) => {
@@ -20,63 +19,41 @@ const Messages = () => {
         const newMessages = doc.data().messages;
         setMessages(newMessages);
 
-        // Check if there's a new message and we're not focused on the window
         if (newMessages.length > previousMessagesLength.current && !document.hasFocus()) {
           const latestMessage = newMessages[newMessages.length - 1];
           if (latestMessage.senderId !== data.user.uid) {
-            showNotification(
-              data.user.displayName || "New Message",
-              {
-                body: latestMessage.text || "New message received",
-                tag: "new-message",
-                renotify: true,
-              }
-            );
+            showNotification(data.user.displayName || "New Message", {
+              body: latestMessage.text || "New message received",
+              tag: "new-message",
+              renotify: true,
+            });
           }
         }
         previousMessagesLength.current = newMessages.length;
       }
     });
 
-    return () => {
-      unSub();
-    };
+    return () => unSub();
   }, [data.chatId, data.user.uid, data.user.displayName]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
     <div
-      className="bg-gradient-to-br from-blue-50 to-indigo-50 h-[calc(100vh-130px)] md:h-[calc(100vh-160px)] 
-        overflow-y-auto p-6 space-y-6 
-        scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100 
-        shadow-[inset_0_2px_15px_rgba(0,0,0,0.1)] 
-        border border-blue-100/50 rounded-2xl
-        backdrop-blur-sm backdrop-filter"
+      className="h-full overflow-y-auto px-4 py-5 space-y-1"
+      style={{ background: "var(--surface)" }}
     >
       {messages.length === 0 ? (
-        <div className="text-center ">
-          <p className="text-xl  bg-gradient-to-r from-blue-600 to-indigo-600 
-            bg-clip-text text-transparent ">
-            Start chatting!
+        <div className="flex items-center justify-center h-full">
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            No messages yet — say hello! 👋
           </p>
         </div>
       ) : (
         messages.map((m, index) => (
-          <div
-            key={m.id || index}
-            className=" 
-              rounded-xl
-             "
-          >
-            <Message message={m} />
-          </div>
+          <Message key={m.id || index} message={m} />
         ))
       )}
       <div ref={messagesEndRef} />

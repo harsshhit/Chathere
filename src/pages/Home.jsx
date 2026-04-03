@@ -10,23 +10,28 @@ const Home = () => {
   const { data } = useContext(ChatContext);
 
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div
+      className="flex h-screen overflow-hidden"
+      style={{ background: "var(--surface)" }}
+    >
       {/* Sidebar */}
-      <div 
+      <div
         className={`
-          ${(!isMobileView && data.chatId) ? 'hidden md:block' : 'w-full'} 
-          md:w-[350px] lg:w-[400px]
-          h-full transition-all duration-300 ease-in-out
+          flex-shrink-0 h-full
+          ${(!isMobileView && data.chatId) ? "hidden md:block" : "w-full md:w-auto"}
+          md:w-[320px] lg:w-[360px] xl:w-[380px]
+          transition-all duration-300 ease-in-out
         `}
+        style={{ borderRight: "1px solid var(--border)" }}
       >
         <Sidebar />
       </div>
 
-      {/* Main Chat Area */}
-      <div 
+      {/* Main chat */}
+      <div
         className={`
-          ${(isMobileView || !data.chatId) ? 'hidden md:block' : 'w-full fixed inset-0 md:static'} 
-          md:flex-1 bg-white
+          flex-1 h-full min-w-0
+          ${isMobileView || !data.chatId ? "hidden md:block" : "block"}
           transition-all duration-300 ease-in-out
         `}
       >

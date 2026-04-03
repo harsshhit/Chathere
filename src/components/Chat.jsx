@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
-import { ArrowLeftCircle, PhoneCall, Video, Settings2, X } from "lucide-react";
+import { ArrowLeft, X, MessageSquare } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { doc, getDoc } from "firebase/firestore";
 import Messages from "./Messages";
@@ -7,6 +7,7 @@ import Input from "./Input";
 import { ChatContext } from "../context/ChatContext";
 import { useUI } from "../context/UIContext";
 import { db } from "../firebase";
+import Avatar from "./Avatar";
 
 const Chat = () => {
   const { data } = useContext(ChatContext);
@@ -14,172 +15,201 @@ const Chat = () => {
   const [showUserModal, setShowUserModal] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
 
-  const handleBack = () => {
-    setIsMobileView(true);
-  };
+  const handleBack = () => setIsMobileView(true);
 
   useEffect(() => {
     const fetchUserDetails = async () => {
-      if (data.user?.uid) {
+      if (data.user?.uid && !data.user?.isGroup) {
         const userDoc = await getDoc(doc(db, "users", data.user.uid));
-        if (userDoc.exists()) {
-          setUserDetails(userDoc.data());
-        }
+        if (userDoc.exists()) setUserDetails(userDoc.data());
       }
     };
-
-    if (showUserModal) {
-      fetchUserDetails();
-    }
-  }, [showUserModal, data.user?.uid]);
+    if (showUserModal) fetchUserDetails();
+  }, [showUserModal, data.user?.uid, data.user?.isGroup]);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.3 }}
-      className="h-full flex flex-col bg-white md:bg-transparent rounded-2xl shadow-xl"
+      className="h-full flex flex-col"
+      style={{ background: "var(--surface)" }}
     >
-      <motion.div
-        initial={{ y: -20 }}
-        animate={{ y: 0 }}
-        className="bg-gradient-to-br from-blue-50 to-indigo-50 min-h-[10vh]    p-4 flex items-center justify-between sticky top-0  "
-      >
-        <div className="flex items-center space-x-4 ">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="md:hidden text-blue-600 hover:text-blue-700 p-2 -ml-2 rounded-full hover:bg-blue-50 transition-colors duration-200"
-            onClick={handleBack}
+      {data.chatId ? (
+        <>
+          {/* Chat Header */}
+          <motion.div
+            initial={{ y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+            style={{
+              background: "var(--surface-2)",
+              borderBottom: "1px solid var(--border)",
+            }}
           >
-            <ArrowLeftCircle size={26} />
-          </motion.button>
+            <div className="flex items-center gap-3">
+              {/* Mobile back */}
+              <button
+                className="md:hidden icon-btn -ml-1 mr-1"
+                onClick={handleBack}
+              >
+                <ArrowLeft size={20} />
+              </button>
 
-          {data.user?.photoURL && (
-            <div className="flex items-center space-x-4">
-              <motion.img
-                initial={{ scale: 0.5 }}
-                animate={{ scale: 1 }}
-                whileHover={{ scale: 1.05 }}
-                src={data.user?.photoURL}
-                alt={data.user?.displayName}
-                className="w-12 h-12 rounded-full object-cover border-2 border-blue-200 shadow-md hover:border-blue-300 transition-all duration-200 cursor-pointer"
-                onClick={() => setShowUserModal(true)}
-              />
-              <span
-                className="font-bold text-gray-800 text-lg line-clamp-1 hover:text-blue-600 transition-colors duration-200 cursor-pointer"
+              {/* Avatar + name */}
+              <button
+                className="flex items-center gap-3 group"
                 onClick={() => setShowUserModal(true)}
               >
-                {data.user?.displayName}
-              </span>
+                <Avatar
+                    src={data.user?.photoURL}
+                    alt={data.user?.displayName}
+                    className="w-10 h-10 rounded-2xl object-cover transition-transform duration-200 group-hover:scale-105"
+                    style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+                  />
+                <div className="text-left">
+                  <p
+                    className="text-sm font-semibold leading-tight transition-colors duration-200 group-hover:text-indigo-300"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {data.user?.displayName}
+                  </p>
+                </div>
+              </button>
             </div>
-          )}
-        </div>
 
-        {/* <div className="flex items-center space-x-2 md:space-x-3">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="p-2 rounded-full hover:bg-green-50 transition-all duration-200 group"
-          >
-            <PhoneCall className="w-6 h-6 text-blue-600 group-hover:text-green-500 transition-colors duration-200" />
-          </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="p-2 rounded-full hover:bg-blue-50 transition-all duration-200 group"
-          >
-            <Video className="w-6 h-6 text-blue-600 group-hover:text-blue-700 transition-colors duration-200" />
-          </motion.button>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="p-2 rounded-full hover:bg-blue-50 transition-all duration-200 group"
-          >
-            <Settings2 className="w-6 h-6 text-blue-600 group-hover:text-blue-700 transition-colors duration-200" />
-          </motion.button>
-        </div> */}
-      </motion.div>
 
+          </motion.div>
+
+          {/* Messages area */}
+          <div className="flex-1 overflow-hidden">
+            <Messages />
+          </div>
+
+          {/* Input */}
+          <div
+            className="flex-shrink-0"
+            style={{ borderTop: "1px solid var(--border)" }}
+          >
+            <Input />
+          </div>
+        </>
+      ) : (
+        /* Empty state */
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex-1 flex items-center justify-center p-8"
+        >
+          <div className="text-center max-w-xs">
+            <div
+              className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5"
+              style={{
+                background: "linear-gradient(135deg, rgba(99,102,241,0.2), rgba(167,139,250,0.2))",
+                border: "1px solid rgba(99,102,241,0.25)",
+                boxShadow: "0 0 60px rgba(99,102,241,0.1)",
+              }}
+            >
+              <MessageSquare size={32} style={{ color: "var(--primary-light)" }} />
+            </div>
+            <h2
+              className="text-lg font-semibold mb-2"
+              style={{ color: "var(--text-primary)" }}
+            >
+              Your messages
+            </h2>
+            <p className="text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              Select a conversation from the sidebar or search for someone new to start chatting.
+            </p>
+          </div>
+        </motion.div>
+      )}
+
+      {/* User detail modal */}
       <AnimatePresence>
         {showUserModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
             onClick={() => setShowUserModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.92, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-lg relative border border-gray-200"
+              exit={{ scale: 0.92, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 28 }}
+              className="glass-card p-8 w-full max-w-sm relative text-center"
               onClick={(e) => e.stopPropagation()}
             >
               <button
-                className="absolute top-4 right-4 text-gray-600 hover:text-gray-800 transition-colors duration-200"
                 onClick={() => setShowUserModal(false)}
+                className="absolute top-4 right-4 icon-btn"
               >
-                <X size={24} />
+                <X size={18} />
               </button>
-              <div className="flex flex-col items-center space-y-6">
+
+              <div className="flex flex-col items-center gap-4">
                 <div className="relative">
-                  <div className="absolute inset-0 bg-blue-200 rounded-full blur-md opacity-20 animate-pulse"></div>
-                  <motion.img
-                    whileHover={{ scale: 1.05 }}
+                  <Avatar
                     src={data.user?.photoURL}
                     alt={data.user?.displayName}
-                    className="relative w-32 h-32 rounded-full object-cover border-4 border-blue-100 shadow-md ring-2 ring-blue-200"
+                    className="w-24 h-24 rounded-3xl object-cover"
+                    style={{
+                      border: "2px solid rgba(99,102,241,0.5)",
+                      boxShadow: "0 0 40px rgba(99,102,241,0.3)",
+                    }}
                   />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800">
-                  {data.user?.displayName}
-                </h2>
-                <div className="space-y-3 text-center w-full px-4">
-                  <p className="text-gray-700 bg-blue-50 py-2 px-4 rounded-lg">
-                    {data.user?.email}
-                  </p>
-                  <p className="text-gray-600 bg-gray-50 py-3 px-4 rounded-lg">
-                    {userDetails?.bio || "No bio available"}
-                  </p>
+
+                <div>
+                  <h2
+                    className="text-xl font-bold mb-1"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {data.user?.displayName}
+                  </h2>
+                  {!data.user?.isGroup && (
+                    <p className="text-sm" style={{ color: "var(--primary-light)" }}>
+                      {data.user?.email}
+                    </p>
+                  )}
                 </div>
+
+                {!data.user?.isGroup && userDetails?.bio && (
+                  <div
+                    className="w-full px-4 py-3 rounded-xl text-sm"
+                    style={{
+                      background: "var(--surface-3)",
+                      color: "var(--text-secondary)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    {userDetails.bio}
+                  </div>
+                )}
+
+                {data.user?.isGroup && data.user?.members && (
+                  <div className="w-full mt-2 text-left">
+                    <h3 className="text-[10px] uppercase font-bold text-gray-500 mb-2 tracking-wider pl-1">Members ({data.user.members.length})</h3>
+                    <div className="flex flex-col gap-2 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
+                       {data.user.members.map((member) => (
+                         <div key={member.uid} className="flex items-center gap-3 p-2 rounded-xl transition-colors hover:bg-white/5" style={{ background: "rgba(255,255,255,0.02)" }}>
+                           <Avatar src={member.photoURL} alt={member.displayName} className="w-8 h-8 rounded-full" />
+                           <span className="text-sm font-medium flex-1 truncate">{member.displayName}</span>
+                           {data.user?.admin === member.uid && <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-bold">Admin</span>}
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {data.chatId ? (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex-1 overflow-y-auto bg-gradient-to-b from-blue-50 to-white"
-          >
-            <Messages />
-          </motion.div>
-          <motion.div
-            initial={{ y: 20 }}
-            animate={{ y: 0 }}
-            className="bg-white border-t border-blue-100 rounded-b-2xl shadow-lg backdrop-blur-sm bg-opacity-90"
-          >
-            <Input />
-          </motion.div>
-        </>
-      ) : (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex-1 flex items-center justify-center bg-gradient-to-b from-blue-50 to-white rounded-b-2xl"
-        >
-          <div className="text-center p-8 bg-white bg-opacity-80 rounded-2xl shadow-lg backdrop-blur-sm">
-            <p className="text-2xl font-bold text-blue-600 animate-pulse">
-              Select a chat to start messaging
-            </p>
-          </div>
-        </motion.div>
-      )}
     </motion.div>
   );
 };
