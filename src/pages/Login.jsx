@@ -74,7 +74,7 @@ const Login = () => {
   };
 
   return (
-    <div className="auth-bg min-h-screen flex items-center justify-center p-4 sm:p-6">
+    <div className="auth-bg min-h-[100dvh] flex items-center justify-center p-4 sm:p-6">
       {/* Decorative orb top right */}
       <div
         className="pointer-events-none fixed top-0 right-0 w-[520px] h-[520px] rounded-full opacity-20"

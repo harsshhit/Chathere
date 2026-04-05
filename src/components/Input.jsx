@@ -251,8 +251,8 @@ const Input = () => {
 
       {/* Input row */}
       <div className="flex items-center gap-2">
-        {/* Image upload */}
-        <div className="flex-shrink-0">
+        {/* Image upload (Hidden) */}
+        <div className="hidden">
           <input
             type="file"
             id="chat-file"
@@ -272,8 +272,21 @@ const Input = () => {
           </motion.label>
         </div>
 
+        {/* GIF toggle */}
+        <motion.button
+          type="button"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
+          className="icon-btn flex-shrink-0 cursor-pointer font-bold tracking-widest text-[11px]"
+          title="Send GIF"
+          style={{ width: "42px", height: "42px", color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)" }}
+        >
+          GIF
+        </motion.button>
+
         {/* Text input + emoji */}
-        <div className="relative flex-1">
+        <div className="relative flex-1 min-w-0">
           {/* Emoji toggle */}
           <button
             type="button"
@@ -319,23 +332,11 @@ const Input = () => {
             onChange={handleTyping}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
-            className="chat-input !pl-11"
+            className="chat-input !pl-11 w-full"
             id="chat-message-input"
           />
         </div>
 
-        {/* GIF toggle */}
-        <motion.button
-          type="button"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
-          className="icon-btn flex-shrink-0 cursor-pointer font-bold tracking-widest text-[11px]"
-          title="Send GIF"
-          style={{ width: "42px", height: "42px", color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)" }}
-        >
-          GIF
-        </motion.button>
 
         {/* Send button */}
         <motion.button

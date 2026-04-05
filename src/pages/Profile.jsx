@@ -138,7 +138,7 @@ const Profile = () => {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="min-h-[100dvh] flex flex-col"
       style={{ background: "var(--surface)" }}
     >
       {/* Top bar */}

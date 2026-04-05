@@ -131,7 +131,7 @@ const Register = () => {
   const strength = passwordStrength();
 
   return (
-    <div className="auth-bg min-h-screen flex items-center justify-center p-4 sm:p-6">
+    <div className="auth-bg min-h-[100dvh] flex items-center justify-center p-4 sm:p-6">
       {/* Decorative orbs */}
       <div
         className="pointer-events-none fixed top-0 left-0 w-[500px] h-[500px] rounded-full opacity-15"

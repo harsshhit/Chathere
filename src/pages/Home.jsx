@@ -11,7 +11,7 @@ const Home = () => {
 
   return (
     <div
-      className="flex h-screen overflow-hidden"
+      className="flex fixed inset-0 overflow-hidden"
       style={{ background: "var(--surface)" }}
     >
       {/* Sidebar */}
