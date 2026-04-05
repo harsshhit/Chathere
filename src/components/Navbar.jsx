@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Avatar from "./Avatar";
 import { Users } from "lucide-react";
 import CreateGroup from "./CreateGroup";
+import logo from "./logo.png";
 
 const Navbar = () => {
   const { currentUser } = useContext(AuthContext);
@@ -22,11 +23,17 @@ const Navbar = () => {
     >
       {/* Brand */}
       <motion.button
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
         onClick={() => navigate("/")}
+        className="flex-shrink-0 flex items-center justify-center outline-none rounded-xl hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-indigo-500/50 transition-all duration-300 px-2 py-1 -ml-2 cursor-pointer"
+        title="Home"
       >
-        <span className="brand-logo text-xl">Quawk</span>
+        <img 
+          src={logo} 
+          alt="logo" 
+          className="h-8 sm:h-9 md:h-10 w-auto object-contain drop-shadow-md" 
+        />
       </motion.button>
 
       {/* Right side actions */}

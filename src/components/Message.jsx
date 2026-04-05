@@ -2,8 +2,7 @@ import React, { useContext, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import { Download, ZoomIn } from "lucide-react";
-// import { Download, ZoomIn } from "lucide-react";
+import { Download, ZoomIn, Check, CheckCheck } from "lucide-react";
 import { getStorage, ref as storageRef, getDownloadURL } from "firebase/storage";
 import Avatar from "./Avatar";
 
@@ -16,7 +15,7 @@ const formatDate = (date) => {
   }
 };
 
-const Message = ({ message }) => {
+const Message = ({ message, lastRead }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const { currentUser } = useContext(AuthContext);
@@ -24,6 +23,18 @@ const Message = ({ message }) => {
   const ref = useRef();
 
   const isOwn = message.senderId === currentUser.uid;
+
+  let isRead = false;
+  if (isOwn && lastRead) {
+    const msgTime = message.date?.toMillis ? message.date.toMillis() : 0;
+    if (data.user?.isGroup && data.user?.members) {
+      isRead = data.user.members.some(
+        (m) => m.uid !== currentUser.uid && lastRead[m.uid] >= msgTime
+      );
+    } else {
+      isRead = lastRead[data.user?.uid] >= msgTime;
+    }
+  }
 
   const handleDownload = async (e) => {
     e.stopPropagation();
@@ -90,12 +101,19 @@ const Message = ({ message }) => {
           >
             {message.text}
             <span
-              className={`block text-[10px] mt-1 text-right ${
+              className={`flex items-center gap-1 justify-end text-[10px] mt-1 ${
                 isOwn ? "text-indigo-200/70" : "opacity-50"
               }`}
               style={{ color: isOwn ? "rgba(255,255,255,0.5)" : "var(--text-muted)" }}
             >
               {formatDate(message.date)}
+              {isOwn && (
+                isRead ? (
+                  <CheckCheck size={14} className="text-blue-400 opacity-90" />
+                ) : (
+                  <Check size={14} className="opacity-60" />
+                )
+              )}
             </span>
           </div>
         )}
@@ -129,10 +147,17 @@ const Message = ({ message }) => {
 
             {/* Timestamp on image */}
             <span
-              className="absolute bottom-2 right-2 text-[10px] text-white px-2 py-0.5 rounded-full"
+              className="absolute bottom-2 right-2 text-[10px] text-white px-2 py-0.5 rounded-full flex items-center gap-1"
               style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
             >
               {formatDate(message.date)}
+              {isOwn && (
+                isRead ? (
+                  <CheckCheck size={12} className="text-blue-300 opacity-90" />
+                ) : (
+                  <Check size={12} className="opacity-80" />
+                )
+              )}
             </span>
 
             {/* Download button (expanded) */}

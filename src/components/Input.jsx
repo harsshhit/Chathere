@@ -29,6 +29,16 @@ const Input = () => {
   const MAX_FILE_SIZE = 5 * 1024 * 1024;
   const pickerRef = useRef(null);
   const inputRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+
+  const stopTyping = () => {
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (data.chatId) {
+      updateDoc(doc(db, "chats", data.chatId), {
+        [`typing.${currentUser.uid}`]: false
+      }).catch(() => {}); // ignore errors if doc doesn't exist yet
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -89,6 +99,7 @@ const Input = () => {
   const handleSend = async () => {
     if (!text.trim() && !img) return;
     setIsLoading(true);
+    stopTyping();
 
     try {
       if (img) {
@@ -146,6 +157,7 @@ const Input = () => {
   const handleGifSend = async (gifUrl) => {
     setShowGifPicker(false);
     setIsLoading(true);
+    stopTyping();
 
     try {
       await updateDoc(doc(db, "chats", data.chatId), {
@@ -178,6 +190,32 @@ const Input = () => {
   const onEmojiClick = (emojiObject) => {
     setText((prev) => prev + emojiObject.emoji);
     inputRef.current?.focus();
+    
+    if (data.chatId && !isLoading) {
+      updateDoc(doc(db, "chats", data.chatId), {
+        [`typing.${currentUser.uid}`]: true
+      }).catch(() => {});
+      
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        stopTyping();
+      }, 2000);
+    }
+  };
+
+  const handleTyping = (e) => {
+    setText(e.target.value);
+    
+    if (data.chatId && !isLoading) {
+      updateDoc(doc(db, "chats", data.chatId), {
+        [`typing.${currentUser.uid}`]: true
+      }).catch(() => {});
+      
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        stopTyping();
+      }, 2000);
+    }
   };
 
   return (
@@ -278,7 +316,7 @@ const Input = () => {
             type="text"
             placeholder="Message…"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleTyping}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
             className="chat-input !pl-11"
