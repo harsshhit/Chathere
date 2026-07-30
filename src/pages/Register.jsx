@@ -4,7 +4,7 @@ import { createUserWithEmailAndPassword, updateProfile, signInWithPopup } from "
 import { auth, db, storage, googleProvider } from "../firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { User, Mail, Lock, ImagePlus, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { User, Mail, Lock, ImagePlus, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const Register = () => {
@@ -23,13 +23,38 @@ const Register = () => {
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setErr(true);
+        setErrMsg("Avatar image must be under 5MB.");
+        return;
+      }
       setAvatar(file);
       setAvatarPreview(URL.createObjectURL(file));
     }
   };
 
+  const validateForm = () => {
+    if (!displayName.trim()) {
+      setErr(true);
+      setErrMsg("Please enter a display name.");
+      return false;
+    }
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setErr(true);
+      setErrMsg("Please enter a valid email address.");
+      return false;
+    }
+    if (!password || password.length < 6) {
+      setErr(true);
+      setErrMsg("Password must be at least 6 characters long.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!validateForm()) return;
 
     try {
       setLoading(true);
@@ -132,7 +157,6 @@ const Register = () => {
 
   return (
     <div className="auth-bg min-h-[100dvh] flex items-center justify-center p-4 sm:p-6">
-      {/* Decorative orbs */}
       <div
         className="pointer-events-none fixed top-0 left-0 w-[500px] h-[500px] rounded-full opacity-15"
         style={{ background: "radial-gradient(circle, #6366f1 0%, transparent 70%)", filter: "blur(60px)", transform: "translate(-40%, -30%)" }}
@@ -149,15 +173,13 @@ const Register = () => {
         className="relative z-10 w-full max-w-[440px]"
       >
         <div className="glass-card p-8 sm:p-10">
-          {/* Header */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={0} className="mb-7 text-center">
-            <h1 className="brand-logo text-4xl mb-1.5">Quawk</h1>
+            <h1 className="brand-logo text-4xl mb-1.5">ChatHere</h1>
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
               Create your account — it's free
             </p>
           </motion.div>
 
-          {/* Avatar picker */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={1} className="flex justify-center mb-6">
             <label htmlFor="register-avatar" className="cursor-pointer group">
               <div className="relative">
@@ -196,9 +218,7 @@ const Register = () => {
             </label>
           </motion.div>
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-3.5">
-            {/* Display name */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={2} className="relative">
               <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} />
               <input
@@ -209,10 +229,10 @@ const Register = () => {
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="auth-input"
                 id="register-name"
+                aria-label="Display name"
               />
             </motion.div>
 
-            {/* Email */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={3} className="relative">
               <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} />
               <input
@@ -223,10 +243,10 @@ const Register = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 className="auth-input"
                 id="register-email"
+                aria-label="Email address"
               />
             </motion.div>
 
-            {/* Password */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={4} className="relative">
               <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} />
               <input
@@ -237,18 +257,19 @@ const Register = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 className="auth-input pr-10"
                 id="register-password"
+                aria-label="Password"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors duration-200"
                 style={{ color: "var(--text-muted)" }}
+                aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </motion.div>
 
-            {/* Password strength */}
             <AnimatePresence>
               {strength && (
                 <motion.div
@@ -273,18 +294,17 @@ const Register = () => {
               )}
             </AnimatePresence>
 
-            {/* Error */}
             {err && (
-              <motion.p
+              <motion.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-xs text-red-400 px-1"
+                className="flex items-center gap-2 text-xs text-red-400 px-1"
               >
-                {errMsg}
-              </motion.p>
+                <AlertCircle size={14} className="flex-shrink-0" />
+                <span>{errMsg}</span>
+              </motion.div>
             )}
 
-            {/* Submit */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={5}>
               <button
                 type="submit"
@@ -304,18 +324,17 @@ const Register = () => {
             </motion.div>
           </form>
 
-          {/* Divider */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={6} className="auth-divider my-5">
             <span>or continue with</span>
           </motion.div>
 
-          {/* Google */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={7}>
             <button
               onClick={handleGoogleSignUp}
               disabled={googleLoading}
               className="auth-btn-google"
               id="register-google"
+              type="button"
             >
               {googleLoading ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -328,7 +347,6 @@ const Register = () => {
             </button>
           </motion.div>
 
-          {/* Footer */}
           <motion.p
             variants={fadeUp}
             initial="hidden"

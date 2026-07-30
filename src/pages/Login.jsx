@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
-import { Lock, Mail, Eye, EyeOff } from "lucide-react";
+import { Lock, Mail, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -17,8 +17,24 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
+  const validateForm = () => {
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      setErr(true);
+      setErrMsg("Please enter a valid email address.");
+      return false;
+    }
+    if (!password) {
+      setErr(true);
+      setErrMsg("Please enter your password.");
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!validateForm()) return;
+
     try {
       setLoading(true);
       setErr(false);
@@ -30,6 +46,8 @@ const Login = () => {
         setErrMsg("Invalid email or password.");
       } else if (err.code === "auth/user-not-found") {
         setErrMsg("No account found with this email.");
+      } else if (err.code === "auth/too-many-requests") {
+        setErrMsg("Too many failed attempts. Please try again later.");
       } else {
         setErrMsg("Something went wrong. Please try again.");
       }
@@ -75,7 +93,6 @@ const Login = () => {
 
   return (
     <div className="auth-bg min-h-[100dvh] flex items-center justify-center p-4 sm:p-6">
-      {/* Decorative orb top right */}
       <div
         className="pointer-events-none fixed top-0 right-0 w-[520px] h-[520px] rounded-full opacity-20"
         style={{
@@ -84,7 +101,6 @@ const Login = () => {
           transform: "translate(40%, -40%)",
         }}
       />
-      {/* Decorative orb bottom left */}
       <div
         className="pointer-events-none fixed bottom-0 left-0 w-[400px] h-[400px] rounded-full opacity-15"
         style={{
@@ -101,7 +117,6 @@ const Login = () => {
         className="relative z-10 w-full max-w-[420px]"
       >
         <div className="glass-card p-8 sm:p-10">
-          {/* Logo + Header */}
           <motion.div
             variants={fadeUp}
             initial="hidden"
@@ -109,15 +124,13 @@ const Login = () => {
             custom={0}
             className="mb-8 text-center"
           >
-            <h1 className="brand-logo text-4xl mb-1.5">Quawk</h1>
+            <h1 className="brand-logo text-4xl mb-1.5">ChatHere</h1>
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
               Welcome back — sign in to continue
             </p>
           </motion.div>
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={1} className="relative">
               <Mail
                 size={16}
@@ -132,10 +145,10 @@ const Login = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 className="auth-input"
                 id="login-email"
+                aria-label="Email address"
               />
             </motion.div>
 
-            {/* Password */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={2} className="relative">
               <Lock
                 size={16}
@@ -150,29 +163,30 @@ const Login = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 className="auth-input pr-10"
                 id="login-password"
+                aria-label="Password"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-colors duration-200"
                 style={{ color: "var(--text-muted)" }}
+                aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </motion.div>
 
-            {/* Error */}
             {err && (
-              <motion.p
+              <motion.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-xs text-red-400 px-1"
+                className="flex items-center gap-2 text-xs text-red-400 px-1"
               >
-                {errMsg}
-              </motion.p>
+                <AlertCircle size={14} className="flex-shrink-0" />
+                <span>{errMsg}</span>
+              </motion.div>
             )}
 
-            {/* Submit */}
             <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={3}>
               <button
                 type="submit"
@@ -192,32 +206,29 @@ const Login = () => {
             </motion.div>
           </form>
 
-          {/* Divider */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={4} className="auth-divider my-5">
             <span>or continue with</span>
           </motion.div>
 
-          {/* Google */}
           <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={5}>
             <button
               onClick={handleGoogleSignIn}
               disabled={googleLoading}
               className="auth-btn-google"
               id="login-google"
+              type="button"
             >
               {googleLoading ? (
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
                 <svg width="18" height="18" viewBox="0 0 488 512" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z" fill="#4285F4"/>
-                  <path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256" fill="#34A853" opacity="0"/>
                 </svg>
               )}
               Continue with Google
             </button>
           </motion.div>
 
-          {/* Footer link */}
           <motion.p
             variants={fadeUp}
             initial="hidden"

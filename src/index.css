@@ -63,7 +63,6 @@
 }
 
 @layer components {
-  /* Auth form styles */
   .auth-input {
     @apply w-full py-3 border rounded-xl text-sm transition-all duration-200 outline-none;
     background: rgba(255,255,255,0.04);
@@ -83,7 +82,6 @@
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
   }
 
-  /* Kill browser autofill white background */
   .auth-input:-webkit-autofill,
   .auth-input:-webkit-autofill:hover,
   .auth-input:-webkit-autofill:focus {
@@ -127,7 +125,6 @@
     transform: translateY(-1px);
   }
 
-  /* Glass card */
   .glass-card {
     background: rgba(22, 22, 31, 0.85);
     backdrop-filter: blur(20px);
@@ -137,7 +134,6 @@
     box-shadow: 0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset;
   }
 
-  /* Message bubble */
   .msg-bubble-sent {
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
     color: white;
@@ -153,7 +149,6 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   }
 
-  /* Sidebar item */
   .chat-item {
     @apply flex items-center gap-3 px-4 py-3.5 cursor-pointer transition-all duration-200 rounded-xl mx-2;
   }
@@ -166,7 +161,6 @@
     background: rgba(99, 102, 241, 0.15);
   }
 
-  /* Search input */
   .search-input {
     @apply w-full py-2.5 pl-10 pr-4 text-sm rounded-xl transition-all duration-200 outline-none;
     background: var(--surface-3);
@@ -185,7 +179,6 @@
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
   }
 
-  /* Badge online */
   .status-online {
     @apply w-2.5 h-2.5 rounded-full absolute bottom-0 right-0;
     background: #22c55e;
@@ -193,18 +186,13 @@
     box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
   }
 
-  /* Navbar brand */
   .brand-logo {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-weight: 800;
-    background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    letter-spacing: -0.02em;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.03em;
   }
 
-  /* Input bar */
   .chat-input {
     @apply flex-1 py-3 pl-10 pr-4 text-sm rounded-full outline-none transition-all duration-200;
     background: var(--surface-3);
@@ -222,7 +210,6 @@
     background: rgba(99, 102, 241, 0.05);
   }
 
-  /* Icon buttons */
   .icon-btn {
     @apply p-2.5 rounded-xl transition-all duration-200 flex items-center justify-center;
     color: var(--text-secondary);
@@ -233,7 +220,6 @@
     color: var(--primary-light);
   }
 
-  /* Send button */
   .send-btn {
     @apply p-3 rounded-xl flex items-center justify-center transition-all duration-300;
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
@@ -253,7 +239,6 @@
     box-shadow: none;
   }
 
-  /* Divider */
   .auth-divider {
     @apply flex items-center gap-4 my-2;
   }
@@ -295,7 +280,6 @@
     transform: translateY(-2px);
   }
 
-  /* Animated gradient background for auth pages */
   .auth-bg {
     background: var(--surface);
     position: relative;

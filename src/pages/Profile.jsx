@@ -10,6 +10,9 @@ import {
   X,
   Camera,
   ArrowLeft,
+  Bell,
+  Shield,
+  AlertTriangle,
 } from "lucide-react";
 import {
   getStorage,
@@ -24,6 +27,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import Avatar from "../components/Avatar";
+import { requestNotificationPermission } from "../utils/notifications";
 
 const Profile = () => {
   const { currentUser } = useContext(AuthContext);
@@ -32,13 +36,17 @@ const Profile = () => {
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingBio, setIsEditingBio] = useState(false);
-  const [newDisplayName, setNewDisplayName] = useState(currentUser.displayName);
+  const [newDisplayName, setNewDisplayName] = useState(currentUser.displayName || "");
   const [bio, setBio] = useState("");
   const [newBio, setNewBio] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [savingName, setSavingName] = useState(false);
   const [savingBio, setSavingBio] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    Notification?.permission === "granted"
+  );
 
   useEffect(() => {
     const fetchBio = async () => {
@@ -53,12 +61,16 @@ const Profile = () => {
         console.error("Error fetching bio:", err);
       }
     };
-    fetchBio();
-  }, [currentUser.uid]);
+    if (currentUser?.uid) fetchBio();
+  }, [currentUser?.uid]);
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert("File size must be under 5MB");
+      return;
+    }
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -79,6 +91,7 @@ const Profile = () => {
         async () => {
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
           await updateProfile(currentUser, { photoURL: downloadURL });
+          await updateDoc(doc(db, "users", currentUser.uid), { photoURL: downloadURL });
           setUploading(false);
           window.location.reload();
         }
@@ -90,15 +103,17 @@ const Profile = () => {
   };
 
   const handleNameUpdate = async () => {
-    if (!newDisplayName.trim()) return;
+    if (!newDisplayName.trim() || newDisplayName.length < 2) {
+      alert("Display name must be at least 2 characters.");
+      return;
+    }
     setSavingName(true);
     try {
-      await updateProfile(currentUser, { displayName: newDisplayName });
+      await updateProfile(currentUser, { displayName: newDisplayName.trim() });
       await updateDoc(doc(db, "users", currentUser.uid), {
-        displayName: newDisplayName,
+        displayName: newDisplayName.trim(),
       });
       setIsEditingName(false);
-      window.location.reload();
     } catch (err) {
       console.error(err);
     } finally {
@@ -109,14 +124,19 @@ const Profile = () => {
   const handleBioUpdate = async () => {
     setSavingBio(true);
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), { bio: newBio });
-      setBio(newBio);
+      await updateDoc(doc(db, "users", currentUser.uid), { bio: newBio.trim() });
+      setBio(newBio.trim());
       setIsEditingBio(false);
     } catch (err) {
       console.error(err);
     } finally {
       setSavingBio(false);
     }
+  };
+
+  const handleToggleNotifications = async () => {
+    const granted = await requestNotificationPermission();
+    setNotificationsEnabled(granted);
   };
 
   const handleLogout = async () => {
@@ -128,49 +148,47 @@ const Profile = () => {
     }
   };
 
-  const memberSince = new Date(
-    currentUser.metadata.creationTime
-  ).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  const memberSince = currentUser?.metadata?.creationTime
+    ? new Date(currentUser.metadata.creationTime).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "Recently";
 
   return (
     <div
       className="min-h-[100dvh] flex flex-col"
       style={{ background: "var(--surface)" }}
     >
-      {/* Top bar */}
       <div
-        className="px-4 py-3 flex items-center gap-3 flex-shrink-0"
+        className="px-4 py-3 flex items-center justify-between flex-shrink-0"
         style={{
           background: "var(--surface-2)",
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <button
-          onClick={() => navigate("/")}
-          className="icon-btn -ml-1"
-          title="Back to chats"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <span className="brand-logo text-xl">Quawk</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/")}
+            className="icon-btn -ml-1"
+            title="Back to chats"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <span className="brand-logo text-xl">ChatHere</span>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 flex items-start justify-center px-4 py-10 sm:py-16">
+      <div className="flex-1 flex items-start justify-center px-4 py-8 sm:py-12 overflow-y-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
           className="w-full max-w-md"
         >
-          <div className="glass-card p-8 sm:p-10">
-
-            {/* Avatar */}
-            <div className="flex justify-center mb-8">
+          <div className="glass-card p-6 sm:p-8">
+            <div className="flex justify-center mb-6">
               <div className="relative group">
                 <motion.div
                   className="w-24 h-24 rounded-3xl object-cover overflow-hidden"
@@ -188,9 +206,8 @@ const Profile = () => {
                   />
                 </motion.div>
 
-                {/* Upload overlay */}
                 <button
-                  onClick={() => fileInputRef.current.click()}
+                  onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                   className="absolute inset-0 rounded-3xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer"
                   style={{ background: "rgba(0,0,0,0.55)" }}
@@ -209,7 +226,6 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Upload progress */}
             <AnimatePresence>
               {uploading && (
                 <motion.div
@@ -235,14 +251,10 @@ const Profile = () => {
               )}
             </AnimatePresence>
 
-            {/* Fields */}
-            <div className="space-y-5">
-
-              {/* Display name */}
+            <div className="space-y-4">
               <div>
                 <label
-                  className="block text-xs font-medium mb-1.5 uppercase tracking-wider"
-                  style={{ color: "var(--text-muted)" }}
+                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
                   Display name
                 </label>
@@ -260,7 +272,7 @@ const Profile = () => {
                         value={newDisplayName}
                         onChange={(e) => setNewDisplayName(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleNameUpdate()}
-                        className="flex-1 px-3 py-2 text-sm rounded-xl outline-none transition-all duration-200"
+                        className="flex-1 px-3 py-2 text-sm rounded-xl outline-none"
                         style={{
                           background: "var(--surface-3)",
                           border: "1px solid rgba(99,102,241,0.5)",
@@ -271,14 +283,14 @@ const Profile = () => {
                       <button
                         onClick={handleNameUpdate}
                         disabled={savingName}
-                        className="p-2 rounded-xl transition-colors duration-200"
+                        className="p-2 rounded-xl"
                         style={{ background: "var(--primary)", color: "white" }}
                       >
                         <Check size={16} />
                       </button>
                       <button
-                        onClick={() => { setIsEditingName(false); setNewDisplayName(currentUser.displayName); }}
-                        className="p-2 rounded-xl transition-colors duration-200"
+                        onClick={() => { setIsEditingName(false); setNewDisplayName(currentUser.displayName || ""); }}
+                        className="p-2 rounded-xl"
                         style={{ background: "var(--surface-4)", color: "var(--text-muted)" }}
                       >
                         <X size={16} />
@@ -296,7 +308,7 @@ const Profile = () => {
                         border: "1px solid var(--border)",
                       }}
                     >
-                      <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                      <span className="text-sm font-medium text-[var(--text-primary)]">
                         {currentUser.displayName}
                       </span>
                       <button
@@ -311,11 +323,9 @@ const Profile = () => {
                 </AnimatePresence>
               </div>
 
-              {/* Email (read-only) */}
               <div>
                 <label
-                  className="block text-xs font-medium mb-1.5 uppercase tracking-wider"
-                  style={{ color: "var(--text-muted)" }}
+                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
                   Email
                 </label>
@@ -327,17 +337,15 @@ const Profile = () => {
                   }}
                 >
                   <Mail size={14} style={{ color: "var(--text-muted)" }} className="flex-shrink-0" />
-                  <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                  <span className="text-sm text-[var(--text-secondary)]">
                     {currentUser.email}
                   </span>
                 </div>
               </div>
 
-              {/* Bio */}
               <div>
                 <label
-                  className="block text-xs font-medium mb-1.5 uppercase tracking-wider"
-                  style={{ color: "var(--text-muted)" }}
+                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
                   Bio
                 </label>
@@ -355,7 +363,8 @@ const Profile = () => {
                         onChange={(e) => setNewBio(e.target.value)}
                         placeholder="Write something about yourself…"
                         rows={3}
-                        className="w-full px-3 py-2.5 text-sm rounded-xl outline-none resize-none transition-all duration-200"
+                        maxLength={160}
+                        className="w-full px-3 py-2 text-sm rounded-xl outline-none resize-none"
                         style={{
                           background: "var(--surface-3)",
                           border: "1px solid rgba(99,102,241,0.5)",
@@ -367,7 +376,7 @@ const Profile = () => {
                         <button
                           onClick={handleBioUpdate}
                           disabled={savingBio}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors duration-200"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl"
                           style={{ background: "var(--primary)", color: "white" }}
                         >
                           <Check size={13} />
@@ -375,7 +384,7 @@ const Profile = () => {
                         </button>
                         <button
                           onClick={() => { setIsEditingBio(false); setNewBio(bio); }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors duration-200"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl"
                           style={{ background: "var(--surface-4)", color: "var(--text-muted)" }}
                         >
                           <X size={13} />
@@ -413,48 +422,105 @@ const Profile = () => {
                 </AnimatePresence>
               </div>
 
-              {/* Member since */}
-              <div
-                className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                style={{
-                  background: "var(--surface-3)",
-                  border: "1px solid var(--border)",
-                }}
-              >
+              <div>
+                <label className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]">
+                  Preferences & Safety
+                </label>
+                <div className="space-y-2">
+                  <div
+                    onClick={handleToggleNotifications}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
+                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                      <Bell size={15} className="text-indigo-400" />
+                      <span>Desktop Notifications</span>
+                    </div>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${notificationsEnabled ? "bg-green-500/20 text-green-400" : "bg-gray-700 text-gray-400"}`}>
+                      {notificationsEnabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+
+                  <div
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                      <Shield size={15} className="text-indigo-400" />
+                      <span>Encryption & Privacy</span>
+                    </div>
+                    <span className="text-xs text-indigo-400 font-semibold">Active</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}>
                 <Calendar size={14} style={{ color: "var(--text-muted)" }} className="flex-shrink-0" />
-                <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                <span className="text-sm text-[var(--text-secondary)]">
                   Member since {memberSince}
                 </span>
               </div>
 
-              {/* Logout */}
               <div className="pt-2">
                 <button
-                  onClick={handleLogout}
+                  onClick={() => setShowLogoutConfirm(true)}
                   className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
                   style={{
                     background: "rgba(239,68,68,0.08)",
                     border: "1px solid rgba(239,68,68,0.2)",
                     color: "#f87171",
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "rgba(239,68,68,0.15)";
-                    e.currentTarget.style.borderColor = "rgba(239,68,68,0.4)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "rgba(239,68,68,0.08)";
-                    e.currentTarget.style.borderColor = "rgba(239,68,68,0.2)";
-                  }}
                 >
                   <LogOut size={16} />
                   Sign out
                 </button>
               </div>
-
             </div>
           </div>
         </motion.div>
       </div>
+
+      <AnimatePresence>
+        {showLogoutConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setShowLogoutConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-card p-6 max-w-sm w-full text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center mx-auto mb-3 border border-red-500/20">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-1">Confirm Sign Out</h3>
+              <p className="text-xs text-gray-400 mb-5">
+                Are you sure you want to sign out of ChatHere?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

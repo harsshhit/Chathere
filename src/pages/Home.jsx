@@ -1,8 +1,7 @@
-import React from "react";
+import React, { useContext } from "react";
 import Sidebar from "../components/Sidebar";
 import Chat from "../components/Chat";
 import { useUI } from "../context/UIContext";
-import { useContext } from "react";
 import { ChatContext } from "../context/ChatContext";
 
 const Home = () => {
@@ -14,7 +13,6 @@ const Home = () => {
       className="flex fixed inset-0 overflow-hidden"
       style={{ background: "var(--surface)" }}
     >
-      {/* Sidebar */}
       <div
         className={`
           flex-shrink-0 h-full
@@ -27,7 +25,6 @@ const Home = () => {
         <Sidebar />
       </div>
 
-      {/* Main chat */}
       <div
         className={`
           flex-1 h-full min-w-0

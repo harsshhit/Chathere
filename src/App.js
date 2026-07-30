@@ -1,13 +1,21 @@
 import { Route, BrowserRouter, Routes, Navigate } from "react-router-dom";
-import { useContext } from "react";
+import { useContext, lazy, Suspense } from "react";
 import { AuthContext } from "./context/AuthContext";
-import Register from "./pages/Register";
-import Home from "./pages/Home";
-import Login from "./pages/Login";
-// import "./style.scss";
-import "./index.css";
 import { UIProvider } from "./context/UIContext";
-import Profile from "./pages/Profile"
+import { Loader2 } from "lucide-react";
+import "./index.css";
+
+const Register = lazy(() => import("./pages/Register"));
+const Home = lazy(() => import("./pages/Home"));
+const Login = lazy(() => import("./pages/Login"));
+const Profile = lazy(() => import("./pages/Profile"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+
+const LoadingFallback = () => (
+  <div className="min-h-[100dvh] flex items-center justify-center bg-[var(--surface)]">
+    <Loader2 size={32} className="animate-spin text-indigo-400" />
+  </div>
+);
 
 const App = () => {
   const { currentUser } = useContext(AuthContext);
@@ -18,23 +26,29 @@ const App = () => {
   return (
     <UIProvider>
       <BrowserRouter basename="/" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route
-            index
-            element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="login" element={<Login />} />
-          <Route path="register" element={<Register />} />
-          <Route path="profile" element={
-            <ProtectedRoute>
-              <Profile />
-            </ProtectedRoute>
-          } />
-        </Routes>
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            <Route
+              index
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="login" element={<Login />} />
+            <Route path="register" element={<Register />} />
+            <Route
+              path="profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </UIProvider>
   );

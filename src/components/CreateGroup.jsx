@@ -30,6 +30,7 @@ const CreateGroup = ({ onClose }) => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           if (
+            data.displayName &&
             data.displayName.toLowerCase().includes(searchTerm.toLowerCase()) &&
             data.uid !== currentUser.uid
           ) {
@@ -66,10 +67,8 @@ const CreateGroup = ({ onClose }) => {
         ...selectedUsers.map(u => ({ uid: u.uid, displayName: u.displayName, photoURL: u.photoURL }))
       ];
 
-      // 1. Create chat document
       await setDoc(doc(db, "chats", groupId), { messages: [] });
 
-      // 2. Add to each member's userChats
       const groupData = {
         uid: groupId,
         displayName: groupName,

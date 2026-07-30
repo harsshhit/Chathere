@@ -1,32 +1,31 @@
 import React, { useContext, useState, useRef, useEffect } from "react";
-import { Image, Send, X, Loader2, Smile } from "lucide-react";
+import { Send, Loader2, Smile } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import {
   arrayUnion,
   doc,
+  getDoc,
+  setDoc,
   serverTimestamp,
   Timestamp,
   updateDoc,
+  increment,
 } from "firebase/firestore";
-import { db, storage } from "../firebase";
+import { db } from "../firebase";
 import { v4 as uuid } from "uuid";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import EmojiPicker from "emoji-picker-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GifPicker from "./GifPicker";
 
 const Input = () => {
   const [text, setText] = useState("");
-  const [img, setImg] = useState(null);
-  const [imgPreview, setImgPreview] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
-  const MAX_FILE_SIZE = 5 * 1024 * 1024;
   const pickerRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -36,7 +35,7 @@ const Input = () => {
     if (data.chatId) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: false
-      }).catch(() => {}); // ignore errors if doc doesn't exist yet
+      }).catch(() => {});
     }
   };
 
@@ -51,105 +50,105 @@ const Input = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > MAX_FILE_SIZE) {
-        alert("File size should not exceed 5MB");
-        return;
-      }
-      setImg(file);
-      setImgPreview(URL.createObjectURL(file));
+  const ensureChatDocAndUserChats = async (lastMsgText) => {
+    if (!data.chatId) return;
+
+    const chatRef = doc(db, "chats", data.chatId);
+    const chatSnap = await getDoc(chatRef);
+    if (!chatSnap.exists()) {
+      await setDoc(chatRef, { messages: [], typing: {}, lastRead: {} }, { merge: true });
     }
-  };
 
-  const handleCancelImage = () => {
-    setImg(null);
-    setImgPreview(null);
-  };
-
-  const updateUserChats = async (lastMsgText) => {
-    const promises = [];
     if (data.user?.isGroup && data.user?.members) {
-      data.user.members.forEach((member) => {
-        promises.push(
-          updateDoc(doc(db, "userChats", member.uid), {
-            [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
-            [data.chatId + ".date"]: serverTimestamp(),
-          })
-        );
+      for (const member of data.user.members) {
+        await updateDoc(doc(db, "userChats", member.uid), {
+          [`${data.chatId}.userInfo`]: data.user,
+          [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+          [`${data.chatId}.date`]: serverTimestamp(),
+          [`${data.chatId}.unread`]: member.uid === currentUser.uid ? 0 : increment(1),
+        }).catch(async () => {
+          await setDoc(doc(db, "userChats", member.uid), {
+            [data.chatId]: {
+              userInfo: data.user,
+              lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+              date: serverTimestamp(),
+              unread: member.uid === currentUser.uid ? 0 : 1,
+            }
+          }, { merge: true });
+        });
+      }
+    } else if (data.user?.uid) {
+      await updateDoc(doc(db, "userChats", currentUser.uid), {
+        [`${data.chatId}.userInfo`]: {
+          uid: data.user.uid,
+          displayName: data.user.displayName,
+          photoURL: data.user.photoURL,
+        },
+        [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+        [`${data.chatId}.date`]: serverTimestamp(),
+      }).catch(async () => {
+        await setDoc(doc(db, "userChats", currentUser.uid), {
+          [data.chatId]: {
+            userInfo: {
+              uid: data.user.uid,
+              displayName: data.user.displayName,
+              photoURL: data.user.photoURL,
+            },
+            lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+            date: serverTimestamp(),
+          }
+        }, { merge: true });
       });
-    } else {
-      promises.push(
-        updateDoc(doc(db, "userChats", currentUser.uid), {
-          [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
-          [data.chatId + ".date"]: serverTimestamp(),
-        })
-      );
-      promises.push(
-        updateDoc(doc(db, "userChats", data.user.uid), {
-          [data.chatId + ".lastMessage"]: { text: lastMsgText, senderId: currentUser.uid },
-          [data.chatId + ".date"]: serverTimestamp(),
-        })
-      );
+
+      await updateDoc(doc(db, "userChats", data.user.uid), {
+        [`${data.chatId}.userInfo`]: {
+          uid: currentUser.uid,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+        },
+        [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+        [`${data.chatId}.date`]: serverTimestamp(),
+        [`${data.chatId}.unread`]: increment(1),
+      }).catch(async () => {
+        await setDoc(doc(db, "userChats", data.user.uid), {
+          [data.chatId]: {
+            userInfo: {
+              uid: currentUser.uid,
+              displayName: currentUser.displayName,
+              photoURL: currentUser.photoURL,
+            },
+            lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
+            date: serverTimestamp(),
+            unread: 1,
+          }
+        }, { merge: true });
+      });
     }
-    return Promise.all(promises);
   };
 
   const handleSend = async () => {
-    if (!text.trim() && !img) return;
+    if (!text.trim()) return;
     setIsLoading(true);
     stopTyping();
 
-    try {
-      if (img) {
-        const storageRef = ref(storage, uuid());
-        const uploadTask = uploadBytesResumable(storageRef, img);
+    const msgText = text.trim();
 
-        uploadTask.on("state_changed", null, (error) => {
-          console.error("Upload error:", error);
-          setIsLoading(false);
-        }, async () => {
-          try {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            await updateDoc(doc(db, "chats", data.chatId), {
-              messages: arrayUnion({
-                id: uuid(),
-                text,
-                senderId: currentUser.uid,
-                senderName: currentUser.displayName,
-                senderPhoto: currentUser.photoURL,
-                date: Timestamp.now(),
-                img: downloadURL,
-              }),
-            });
-            await updateUserChats(text || "Sent an image");
-            setText("");
-            setImg(null);
-            setImgPreview(null);
-          } catch (err) {
-            console.error(err);
-          } finally {
-            setIsLoading(false);
-          }
-        });
-      } else {
-        await updateDoc(doc(db, "chats", data.chatId), {
-          messages: arrayUnion({
-            id: uuid(),
-            text,
-            senderId: currentUser.uid,
-            senderName: currentUser.displayName,
-            senderPhoto: currentUser.photoURL,
-            date: Timestamp.now(),
-          }),
-        });
-        await updateUserChats(text);
-        setText("");
-        setIsLoading(false);
-      }
+    try {
+      await ensureChatDocAndUserChats(msgText);
+      await updateDoc(doc(db, "chats", data.chatId), {
+        messages: arrayUnion({
+          id: uuid(),
+          text: msgText,
+          senderId: currentUser.uid,
+          senderName: currentUser.displayName,
+          senderPhoto: currentUser.photoURL,
+          date: Timestamp.now(),
+        }),
+      });
+      setText("");
     } catch (error) {
-      console.error("Error sending:", error);
+      console.error("Error sending message:", error);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -159,11 +158,14 @@ const Input = () => {
     setIsLoading(true);
     stopTyping();
 
+    const msgText = text.trim() || "Sent a GIF";
+
     try {
+      await ensureChatDocAndUserChats(msgText);
       await updateDoc(doc(db, "chats", data.chatId), {
         messages: arrayUnion({
           id: uuid(),
-          text,
+          text: text.trim(),
           senderId: currentUser.uid,
           senderName: currentUser.displayName,
           senderPhoto: currentUser.photoURL,
@@ -171,10 +173,9 @@ const Input = () => {
           img: gifUrl,
         }),
       });
-      await updateUserChats(text || "Sent a GIF");
       setText("");
     } catch (err) {
-      console.error(err);
+      console.error("Error sending GIF:", err);
     } finally {
       setIsLoading(false);
     }
@@ -223,56 +224,7 @@ const Input = () => {
       className="px-3 py-3 sm:px-4 sm:py-3.5"
       style={{ background: "var(--surface-2)" }}
     >
-      {/* Image preview */}
-      <AnimatePresence>
-        {imgPreview && (
-          <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            className="mb-3 relative inline-flex"
-          >
-            <img
-              src={imgPreview}
-              alt="Preview"
-              className="max-h-24 rounded-xl object-cover"
-              style={{ border: "1px solid var(--border-light)", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}
-            />
-            <button
-              onClick={handleCancelImage}
-              className="absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center transition-colors duration-200"
-              style={{ background: "#ef4444", color: "white", boxShadow: "0 2px 8px rgba(239,68,68,0.4)" }}
-            >
-              <X size={12} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Input row */}
       <div className="flex items-center gap-2">
-        {/* Image upload (Hidden) */}
-        <div className="hidden">
-          <input
-            type="file"
-            id="chat-file"
-            className="hidden"
-            onChange={handleImageChange}
-            accept="image/*"
-            disabled={isLoading}
-          />
-          <motion.label
-            htmlFor="chat-file"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="icon-btn cursor-pointer flex-shrink-0"
-            title="Attach image"
-          >
-            <Image size={20} />
-          </motion.label>
-        </div>
-
-        {/* GIF toggle */}
         <motion.button
           type="button"
           whileHover={{ scale: 1.05 }}
@@ -285,9 +237,7 @@ const Input = () => {
           GIF
         </motion.button>
 
-        {/* Text input + emoji */}
         <div className="relative flex-1 min-w-0">
-          {/* Emoji toggle */}
           <button
             type="button"
             onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
@@ -297,7 +247,6 @@ const Input = () => {
             <Smile size={18} />
           </button>
 
-          {/* Emoji & GIF pickers */}
           <AnimatePresence>
             {(showEmojiPicker || showGifPicker) && (
               <motion.div
@@ -337,13 +286,11 @@ const Input = () => {
           />
         </div>
 
-
-        {/* Send button */}
         <motion.button
-          whileHover={(!text.trim() && !img) || isLoading ? {} : { scale: 1.05 }}
-          whileTap={(!text.trim() && !img) || isLoading ? {} : { scale: 0.95 }}
+          whileHover={!text.trim() || isLoading ? {} : { scale: 1.05 }}
+          whileTap={!text.trim() || isLoading ? {} : { scale: 0.95 }}
           onClick={handleSend}
-          disabled={(!text.trim() && !img) || isLoading}
+          disabled={!text.trim() || isLoading}
           className="send-btn flex-shrink-0"
           id="chat-send-btn"
         >

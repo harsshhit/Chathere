@@ -37,7 +37,6 @@ const Chat = () => {
     >
       {data.chatId ? (
         <>
-          {/* Chat Header */}
           <motion.div
             initial={{ y: -10, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -48,7 +47,6 @@ const Chat = () => {
             }}
           >
             <div className="flex items-center gap-3">
-              {/* Mobile back */}
               <button
                 className="md:hidden icon-btn -ml-1 mr-1"
                 onClick={handleBack}
@@ -56,17 +54,16 @@ const Chat = () => {
                 <ArrowLeft size={20} />
               </button>
 
-              {/* Avatar + name */}
               <button
                 className="flex items-center gap-3 group"
                 onClick={() => setShowUserModal(true)}
               >
                 <Avatar
-                    src={data.user?.photoURL}
-                    alt={data.user?.displayName}
-                    className="w-10 h-10 rounded-2xl object-cover transition-transform duration-200 group-hover:scale-105"
-                    style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
-                  />
+                  src={data.user?.photoURL}
+                  alt={data.user?.displayName}
+                  className="w-10 h-10 rounded-2xl object-cover transition-transform duration-200 group-hover:scale-105"
+                  style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+                />
                 <div className="text-left">
                   <p
                     className="text-sm font-semibold leading-tight transition-colors duration-200 group-hover:text-indigo-300"
@@ -77,16 +74,12 @@ const Chat = () => {
                 </div>
               </button>
             </div>
-
-
           </motion.div>
 
-          {/* Messages area */}
           <div className="flex-1 overflow-hidden">
             <Messages />
           </div>
 
-          {/* Input */}
           <div
             className="flex-shrink-0"
             style={{ borderTop: "1px solid var(--border)" }}
@@ -95,7 +88,6 @@ const Chat = () => {
           </div>
         </>
       ) : (
-        /* Empty state */
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -125,7 +117,6 @@ const Chat = () => {
         </motion.div>
       )}
 
-      {/* User detail modal */}
       <AnimatePresence>
         {showUserModal && (
           <motion.div

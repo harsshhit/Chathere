@@ -3,15 +3,12 @@ import {
   collection,
   query,
   getDocs,
-  setDoc,
-  doc,
-  updateDoc,
-  serverTimestamp,
-  getDoc,
 } from "firebase/firestore";
 import { Search as SearchIcon, UserPlus, Loader2, X } from "lucide-react";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
+import { ChatContext } from "../context/ChatContext";
+import { useUI } from "../context/UIContext";
 import { motion, AnimatePresence } from "framer-motion";
 import Avatar from "./Avatar";
 
@@ -22,6 +19,8 @@ const Search = () => {
   const [loading, setLoading] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
+  const { dispatch } = useContext(ChatContext);
+  const { setIsMobileView } = useUI();
 
   useEffect(() => {
     const searchUsers = async () => {
@@ -41,6 +40,7 @@ const Search = () => {
         querySnapshot.forEach((doc) => {
           const userData = doc.data();
           if (
+            userData.displayName &&
             userData.displayName.toLowerCase().includes(username.toLowerCase()) &&
             userData.uid !== currentUser.uid
           ) {
@@ -65,47 +65,15 @@ const Search = () => {
     return () => clearTimeout(debounceTimer);
   }, [username, currentUser.uid]);
 
-  const handleSelect = async (selectedUser) => {
-    try {
-      const combinedId =
-        currentUser.uid > selectedUser.uid
-          ? currentUser.uid + selectedUser.uid
-          : selectedUser.uid + currentUser.uid;
-
-      const chatDoc = await getDoc(doc(db, "chats", combinedId));
-
-      if (!chatDoc.exists()) {
-        await setDoc(doc(db, "chats", combinedId), { messages: [] });
-
-        await updateDoc(doc(db, "userChats", currentUser.uid), {
-          [combinedId + ".userInfo"]: {
-            uid: selectedUser.uid,
-            displayName: selectedUser.displayName,
-            photoURL: selectedUser.photoURL,
-          },
-          [combinedId + ".date"]: serverTimestamp(),
-        });
-
-        await updateDoc(doc(db, "userChats", selectedUser.uid), {
-          [combinedId + ".userInfo"]: {
-            uid: currentUser.uid,
-            displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL,
-          },
-          [combinedId + ".date"]: serverTimestamp(),
-        });
-      }
-
-      setUsers([]);
-      setUsername("");
-    } catch (err) {
-      console.error(err);
-    }
+  const handleSelect = (selectedUser) => {
+    dispatch({ type: "CHANGE_USER", payload: selectedUser });
+    setIsMobileView(false);
+    setUsers([]);
+    setUsername("");
   };
 
   return (
     <div className="px-3 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-      {/* Search input */}
       <div className="relative">
         <SearchIcon
           size={15}
@@ -131,7 +99,6 @@ const Search = () => {
         )}
       </div>
 
-      {/* Results */}
       <AnimatePresence>
         {loading && (
           <motion.div

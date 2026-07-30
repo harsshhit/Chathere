@@ -6,7 +6,7 @@ const GifPicker = ({ onGifSelect }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const TENOR_API_KEY = "LIVDSRZULELA"; // Public Tenor API Key
+  const TENOR_API_KEY = "LIVDSRZULELA";
 
   const fetchGifs = async (query = "") => {
     setLoading(true);

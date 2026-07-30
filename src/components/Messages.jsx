@@ -34,6 +34,8 @@ const Messages = () => {
   useEffect(() => {
     requestNotificationPermission();
 
+    if (!data.chatId) return;
+
     const unSub = onSnapshot(doc(db, "chats", data.chatId), (documentSnapshot) => {
       if (documentSnapshot.exists()) {
         const docData = documentSnapshot.data();
@@ -44,13 +46,12 @@ const Messages = () => {
         setTyping(docData.typing || {});
         setLastRead(currentLastRead);
 
-        if (newMessages.length > previousMessagesLength.current && !document.hasFocus()) {
+        if (newMessages.length > previousMessagesLength.current) {
           const latestMessage = newMessages[newMessages.length - 1];
-          if (latestMessage.senderId !== data.user.uid) {
-            showNotification(data.user.displayName || "New Message", {
+          if (latestMessage && latestMessage.senderId !== currentUser.uid && !document.hasFocus()) {
+            showNotification(data.user?.displayName || "New Message", {
               body: latestMessage.text || (latestMessage.img ? "Sent an image" : "New message received"),
-              tag: "new-message",
-              renotify: true,
+              tag: data.chatId,
             });
           }
         }
@@ -61,7 +62,7 @@ const Messages = () => {
     });
 
     return () => unSub();
-  }, [data.chatId, data.user.uid, data.user.displayName, currentUser.uid, markAsReadIfFocused]);
+  }, [data.chatId, data.user?.displayName, currentUser.uid, markAsReadIfFocused]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -92,7 +93,6 @@ const Messages = () => {
         ))
       )}
       
-      {/* Typing Indicator */}
       {Object.entries(typing)
         .filter(([uid, isTyping]) => isTyping && uid !== currentUser.uid)
         .map(([uid]) => (
