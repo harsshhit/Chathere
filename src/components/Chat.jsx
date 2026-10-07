@@ -178,7 +178,7 @@ const Chat = () => {
           </div>
 
           <div className="flex-1 overflow-hidden overscroll-contain">
-            <Messages />
+            <Messages key={data.chatId || "chat"} />
           </div>
 
           <div

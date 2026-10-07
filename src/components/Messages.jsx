@@ -1,5 +1,5 @@
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import React, { useContext, useEffect, useState, useRef, useCallback } from "react";
+import React, { useContext, useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
 import { ChatContext } from "../context/ChatContext";
 import { AuthContext } from "../context/AuthContext";
 import { db } from "../firebase";
@@ -14,14 +14,17 @@ const Messages = () => {
   const [lastRead, setLastRead] = useState({});
   const { data } = useContext(ChatContext);
   const { currentUser } = useContext(AuthContext);
-  const messagesEndRef = useRef(null);
-  const previousMessagesLength = useRef(0);
-  // Track whether this is the initial load for the current chat (instant scroll vs smooth)
-  const isInitialLoad = useRef(true);
-  // Track the chatId that was loaded to detect chat switches
-  const loadedChatId = useRef(null);
 
+  const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
+  const contentRef = useRef(null);
+
+  const previousMessagesLength = useRef(0);
+  const isInitialLoad = useRef(true);
+  const initialScrollComplete = useRef(false);
+  const wasNearBottomRef = useRef(true);
+  const loadedChatId = useRef(data?.chatId || null);
+
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const scrollTimeoutRef = useRef(null);
   const isHoveringRef = useRef(false);
@@ -42,16 +45,29 @@ const Messages = () => {
     }
   }, [data.chatId, currentUser.uid]);
 
+  // Jump scroll instantly to the bottom without animation
+  const scrollToBottomInstant = useCallback(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "auto" });
+    }
+  }, []);
+
   useEffect(() => {
     requestNotificationPermission();
 
     if (!data.chatId) return;
 
-    // Reset scroll tracking when switching chats
+    // Reset scroll tracking and message state when switching chats
     if (loadedChatId.current !== data.chatId) {
       isInitialLoad.current = true;
+      initialScrollComplete.current = false;
+      wasNearBottomRef.current = true;
       previousMessagesLength.current = 0;
       loadedChatId.current = data.chatId;
+      setMessages([]);
       setShowScrollBottom(false);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
@@ -103,14 +119,17 @@ const Messages = () => {
   }, []);
 
   const handleScroll = useCallback(() => {
-    if (isInitialLoad.current) return;
     const el = containerRef.current;
     if (!el) return;
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const notAtBottom = distanceFromBottom > 120;
+    const atBottom = distanceFromBottom <= 120;
+    wasNearBottomRef.current = atBottom;
 
-    if (!notAtBottom) {
+    // Suppress scroll button while initializing / first scroll to bottom
+    if (isInitialLoad.current || !initialScrollComplete.current) return;
+
+    if (atBottom) {
       isAutoScrollingRef.current = false;
       setShowScrollBottom(false);
       if (scrollTimeoutRef.current) {
@@ -138,6 +157,7 @@ const Messages = () => {
 
   const scrollToBottom = useCallback(() => {
     isAutoScrollingRef.current = true;
+    wasNearBottomRef.current = true;
     setShowScrollBottom(false);
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
@@ -188,59 +208,121 @@ const Messages = () => {
     };
   }, []);
 
-  // Scroll to bottom: instant on initial load, smooth only for new messages when user is already near bottom
-  useEffect(() => {
-    if (!messagesEndRef.current) return;
+  // Synchronous pre-paint jump to bottom when messages first load in DOM
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    if (!initialScrollComplete.current && messages.length > 0) {
+      scrollToBottomInstant();
+    }
+  }, [messages, scrollToBottomInstant]);
 
-    if (isInitialLoad.current) {
-      // First render of this chat — jump instantly so there's no scroll animation on mount
-      if (containerRef.current) {
-        containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      } else {
-        messagesEndRef.current.scrollIntoView({ behavior: "auto" });
+  // Ensure bottom focus on chat opening, settle initial load, and handle incoming messages
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    if (!initialScrollComplete.current) {
+      if (messages.length > 0) {
+        scrollToBottomInstant();
+        const rafId = requestAnimationFrame(() => {
+          scrollToBottomInstant();
+        });
+        const timer = setTimeout(() => {
+          scrollToBottomInstant();
+          initialScrollComplete.current = true;
+          isInitialLoad.current = false;
+        }, 200);
+
+        return () => {
+          cancelAnimationFrame(rafId);
+          clearTimeout(timer);
+        };
       }
-      isInitialLoad.current = false;
     } else {
-      // Subsequent messages — smooth scroll only if user is already near the bottom
-      if (isNearBottom()) {
-        messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+      // Subsequent messages after initial load:
+      const latestMessage = messages[messages.length - 1];
+      const isSentByMe = latestMessage && latestMessage.senderId === currentUser.uid;
+
+      if (isSentByMe || isNearBottom()) {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+        }
       }
     }
-  }, [messages, typing, isNearBottom]);
+  }, [messages, typing, currentUser?.uid, isNearBottom, scrollToBottomInstant]);
+
+  // Keep bottom focus pinned as media/images or dynamic content render
+  useEffect(() => {
+    const contentEl = contentRef.current;
+    if (!contentEl || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      if (!initialScrollComplete.current || wasNearBottomRef.current) {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      }
+    });
+
+    observer.observe(contentEl);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto px-4 py-5 space-y-1 custom-scrollbar overscroll-contain"
+        className="h-full overflow-y-auto px-4 py-5 custom-scrollbar overscroll-contain"
         style={{ background: "var(--surface)", overscrollBehavior: "contain" }}
       >
-        {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              No messages yet — say hello! 👋
-            </p>
-          </div>
-        ) : (
-          messages.map((m, index) => (
-            <Message key={m.id || index} message={m} lastRead={lastRead} />
-          ))
-        )}
-
-        {Object.entries(typing)
-          .filter(([uid, isTyping]) => isTyping && uid !== currentUser.uid)
-          .map(([uid]) => (
-            <div key={uid} className="flex items-end gap-2.5 mb-3 px-2 mt-2">
-              <div className="flex bg-[var(--surface-3)] px-4 py-2.5 rounded-full items-center gap-1.5" style={{ border: "1px solid var(--border)" }}>
-                <motion.div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--primary-light)" }} animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
-                <motion.div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--primary-light)" }} animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
-                <motion.div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--primary-light)" }} animate={{ y: [0, -4, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
-              </div>
+        <div ref={contentRef} className="space-y-1 min-h-full flex flex-col">
+          {messages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                No messages yet — say hello! 👋
+              </p>
             </div>
-          ))}
+          ) : (
+            messages.map((m, index) => (
+              <Message key={m.id || index} message={m} lastRead={lastRead} />
+            ))
+          )}
 
-        <div ref={messagesEndRef} />
+          {Object.entries(typing)
+            .filter(([uid, isTyping]) => isTyping && uid !== currentUser.uid)
+            .map(([uid]) => (
+              <div key={uid} className="flex items-end gap-2.5 mb-3 px-2 mt-2">
+                <div
+                  className="flex bg-[var(--surface-3)] px-4 py-2.5 rounded-full items-center gap-1.5"
+                  style={{ border: "1px solid var(--border)" }}
+                >
+                  <motion.div
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: "var(--primary-light)" }}
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ repeat: Infinity, duration: 0.6, delay: 0 }}
+                  />
+                  <motion.div
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: "var(--primary-light)" }}
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }}
+                  />
+                  <motion.div
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: "var(--primary-light)" }}
+                    animate={{ y: [0, -4, 0] }}
+                    transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }}
+                  />
+                </div>
+              </div>
+            ))}
+
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
       <AnimatePresence>
