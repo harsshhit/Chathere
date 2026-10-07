@@ -10,7 +10,7 @@ export const AuthContextProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, 
+    const unsub = onAuthStateChanged(auth,
       (user) => {
         setCurrentUser(user);
         setLoading(false);
@@ -25,7 +25,21 @@ export const AuthContextProvider = ({ children }) => {
   }, []);
 
   if (loading) {
-    return <div>Loading...</div>;
+    return (
+      <div
+        className="min-h-[100dvh] flex items-center justify-center"
+        style={{ background: "var(--surface)" }}
+        aria-label="Loading authentication state"
+      >
+        <div
+          className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
+          style={{
+            borderColor: "var(--primary-light)",
+            borderTopColor: "transparent",
+          }}
+        />
+      </div>
+    );
   }
 
   return (

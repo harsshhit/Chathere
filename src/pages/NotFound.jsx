@@ -15,9 +15,9 @@ const NotFound = () => {
         <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-6 border border-indigo-500/20">
           <MessageSquareOff size={36} />
         </div>
-        <h1 className="text-3xl font-extrabold text-white mb-2">404</h1>
-        <h2 className="text-lg font-semibold text-gray-200 mb-2">Page Not Found</h2>
-        <p className="text-xs text-gray-400 mb-6 leading-relaxed">
+        <h1 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">404</h1>
+        <h2 className="text-lg font-semibold text-[var(--text-secondary)] mb-2">Page Not Found</h2>
+        <p className="text-xs text-[var(--text-muted)] mb-6 leading-relaxed">
           The page you are looking for doesn't exist or has been moved.
         </p>
         <Link

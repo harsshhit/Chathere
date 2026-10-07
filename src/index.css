@@ -12,7 +12,73 @@
     box-sizing: border-box;
   }
 
-  :root {
+  /* Remove 300ms tap delay on all interactive elements */
+  a, button, [role="button"], input, select, textarea, label {
+    touch-action: manipulation;
+  }
+
+  /* ---------------------------------------------------------------
+     Theme tokens
+     :root falls back to LIGHT (the default theme). The active theme is
+     selected with <html data-theme="light|dark">, set by an inline
+     script in public/index.html before React mounts, and kept in sync
+     by ThemeContext afterwards.
+     --------------------------------------------------------------- */
+  :root,
+  [data-theme="light"] {
+    color-scheme: light;
+
+    /* Core palette (same token names in both themes) */
+    --primary: #6366f1;
+    --primary-dark: #4f46e5;
+    /* Darker indigo in light mode so links/accents keep AA contrast on white */
+    --primary-light: #4f46e5;
+    --accent: #a78bfa;
+    --surface: #f8f9fc;
+    --surface-2: #ffffff;
+    --surface-3: #f1f2f8;
+    --surface-4: #e9eaf3;
+    --border: rgba(0,0,0,0.08);
+    --border-light: rgba(0,0,0,0.14);
+    --text-primary: #14141f;
+    --text-secondary: #52526b;
+    --text-muted: #8a8aa3;
+    --glow: rgba(99, 102, 241, 0.18);
+
+    /* Semantic helpers */
+    --hover: rgba(0,0,0,0.045);
+    --subtle: rgba(0,0,0,0.025);
+    --border-hover: rgba(0,0,0,0.22);
+    --input-bg: #f6f7fb;
+    --overlay: rgba(20, 20, 40, 0.35);
+    --glass-bg: rgba(255, 255, 255, 0.88);
+    --glass-inset: rgba(255, 255, 255, 0.6);
+    --shadow: rgba(30, 30, 70, 0.14);
+    --shadow-sm: rgba(30, 30, 70, 0.06);
+    --chip-bg: rgba(255, 255, 255, 0.92);
+    --shimmer: rgba(0,0,0,0.05);
+    --scrollbar-thumb: rgba(99, 102, 241, 0.35);
+    --scrollbar-thumb-hover: rgba(99, 102, 241, 0.6);
+    --gradient-text: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #9333ea 100%);
+
+    /* Message bubbles */
+    --bubble-received: #ffffff;
+    --bubble-received-meta: #6b6b85;
+
+    /* Unread emphasis in chat list */
+    --unread-text: #3730a3;
+    --unread-meta: #4f46e5;
+
+    /* Status text */
+    --success-text: #15803d;
+    --success-bg: rgba(34, 197, 94, 0.14);
+    --warning-text: #b45309;
+    --danger-text: #dc2626;
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+
     --primary: #6366f1;
     --primary-dark: #4f46e5;
     --primary-light: #818cf8;
@@ -27,6 +93,32 @@
     --text-secondary: #a3a3b8;
     --text-muted: #6b6b82;
     --glow: rgba(99, 102, 241, 0.3);
+
+    --hover: rgba(255,255,255,0.05);
+    --subtle: rgba(255,255,255,0.03);
+    --border-hover: rgba(255,255,255,0.2);
+    --input-bg: rgba(255,255,255,0.04);
+    --overlay: rgba(0, 0, 0, 0.7);
+    --glass-bg: rgba(22, 22, 31, 0.85);
+    --glass-inset: rgba(255, 255, 255, 0.04);
+    --shadow: rgba(0, 0, 0, 0.5);
+    --shadow-sm: rgba(0, 0, 0, 0.2);
+    --chip-bg: rgba(0, 0, 0, 0.5);
+    --shimmer: rgba(255,255,255,0.06);
+    --scrollbar-thumb: rgba(99, 102, 241, 0.4);
+    --scrollbar-thumb-hover: rgba(99, 102, 241, 0.7);
+    --gradient-text: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
+
+    --bubble-received: #262636;
+    --bubble-received-meta: #8b8ba3;
+
+    --unread-text: #c7d2fe;
+    --unread-meta: #a5b4fc;
+
+    --success-text: #4ade80;
+    --success-bg: rgba(34, 197, 94, 0.2);
+    --warning-text: #f59e0b;
+    --danger-text: #f87171;
   }
 
   html, body, #root {
@@ -37,6 +129,12 @@
     padding: 0;
     background-color: var(--surface);
     color: var(--text-primary);
+  }
+
+  /* Prevent layout jumps from mobile browser bar: app shell uses 100dvh */
+  .app-shell {
+    height: 100dvh;
+    overflow: hidden;
   }
 
   body {
@@ -53,19 +151,19 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(99, 102, 241, 0.4);
+    background: var(--scrollbar-thumb);
     border-radius: 999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(99, 102, 241, 0.7);
+    background: var(--scrollbar-thumb-hover);
   }
 }
 
 @layer components {
   .auth-input {
     @apply w-full py-3 border rounded-xl text-sm transition-all duration-200 outline-none;
-    background: rgba(255,255,255,0.04);
+    background: var(--input-bg);
     border-color: var(--border-light);
     color: var(--text-primary);
     padding-left: 2.75rem;
@@ -85,7 +183,7 @@
   .auth-input:-webkit-autofill,
   .auth-input:-webkit-autofill:hover,
   .auth-input:-webkit-autofill:focus {
-    -webkit-box-shadow: 0 0 0 30px #16161f inset !important;
+    -webkit-box-shadow: 0 0 0 30px var(--surface-2) inset !important;
     -webkit-text-fill-color: var(--text-primary) !important;
     border-color: var(--border-light) !important;
     transition: background-color 5000s ease-in-out 0s;
@@ -114,24 +212,43 @@
 
   .auth-btn-google {
     @apply w-full py-3 rounded-xl font-medium text-sm transition-all duration-200 flex items-center justify-center gap-3;
-    background: rgba(255,255,255,0.05);
+    background: var(--subtle);
     border: 1px solid var(--border-light);
     color: var(--text-primary);
   }
 
   .auth-btn-google:hover:not(:disabled) {
-    background: rgba(255,255,255,0.09);
-    border-color: rgba(255,255,255,0.2);
+    background: var(--hover);
+    border-color: var(--border-hover);
     transform: translateY(-1px);
   }
 
+  button,
+  [role="button"],
+  .icon-btn,
+  .send-btn,
+  .auth-btn-primary,
+  .auth-btn-google {
+    touch-action: manipulation;
+  }
+
   .glass-card {
-    background: rgba(22, 22, 31, 0.85);
+    background: var(--glass-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--border-light);
     border-radius: 1.5rem;
-    box-shadow: 0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset;
+    box-shadow: 0 32px 80px var(--shadow), 0 0 0 1px var(--glass-inset) inset;
+  }
+
+  /* Disable expensive backdrop-filter blur below md for smooth phone performance */
+  @media (max-width: 767px) {
+    .glass-card {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      background: var(--surface-2) !important;
+      box-shadow: 0 12px 32px var(--shadow) !important;
+    }
   }
 
   .msg-bubble-sent {
@@ -142,11 +259,11 @@
   }
 
   .msg-bubble-received {
-    background: var(--surface-4);
+    background: var(--bubble-received);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 8px var(--shadow-sm);
   }
 
   .chat-item {
@@ -189,7 +306,7 @@
   .brand-logo {
     font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--text-primary);
     letter-spacing: -0.03em;
   }
 
@@ -261,8 +378,32 @@
 }
 
 @layer utilities {
+  .safe-top {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+
+  .safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .safe-x {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+
+  .overscroll-contain {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .viewport-height {
+    height: 100vh;
+    height: 100dvh;
+    height: var(--visual-viewport-height, 100dvh);
+  }
+
   .text-gradient {
-    background: linear-gradient(135deg, #818cf8 0%, #a78bfa 50%, #c084fc 100%);
+    background: var(--gradient-text);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -322,7 +463,7 @@
   }
 
   .shimmer {
-    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, var(--shimmer) 50%, transparent 100%);
     background-size: 200% 100%;
     animation: shimmer 2s infinite;
   }

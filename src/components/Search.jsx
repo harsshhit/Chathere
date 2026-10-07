@@ -8,8 +8,8 @@ import { Search as SearchIcon, UserPlus, Loader2, X } from "lucide-react";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import { useUI } from "../context/UIContext";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import Avatar from "./Avatar";
 
 const Search = () => {
@@ -20,7 +20,7 @@ const Search = () => {
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
-  const { setIsMobileView } = useUI();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const searchUsers = async () => {
@@ -67,7 +67,13 @@ const Search = () => {
 
   const handleSelect = (selectedUser) => {
     dispatch({ type: "CHANGE_USER", payload: selectedUser });
-    setIsMobileView(false);
+    // Derive the same chatId the reducer would compute
+    const derivedChatId = selectedUser.isGroup
+      ? selectedUser.uid
+      : currentUser.uid > selectedUser.uid
+      ? currentUser.uid + selectedUser.uid
+      : selectedUser.uid + currentUser.uid;
+    navigate(`/chat/${derivedChatId}`);
     setUsers([]);
     setUsername("");
   };
@@ -137,8 +143,9 @@ const Search = () => {
                 animate={{ opacity: 1, x: 0 }}
                 onClick={() => handleSelect(user)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 group"
-                style={{ background: "var(--surface-3)" }}
+                style={{ background: "var(--surface-3)", touchAction: "manipulation" }}
                 whileHover={{ backgroundColor: "rgba(99,102,241,0.12)" }}
+                whileTap={{ scale: 0.98 }}
               >
                 <Avatar
                   src={user.photoURL}

@@ -13,6 +13,8 @@ import {
   Bell,
   Shield,
   AlertTriangle,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   getStorage,
@@ -28,9 +30,11 @@ import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import Avatar from "../components/Avatar";
 import { requestNotificationPermission } from "../utils/notifications";
+import { useTheme } from "../context/ThemeContext";
 
 const Profile = () => {
   const { currentUser } = useContext(AuthContext);
+  const { theme, setTheme } = useTheme();
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
@@ -150,19 +154,27 @@ const Profile = () => {
 
   const memberSince = currentUser?.metadata?.creationTime
     ? new Date(currentUser.metadata.creationTime).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    })
     : "Recently";
+
+  const handleBack = () => {
+    if (window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate("/", { replace: true });
+    }
+  };
 
   return (
     <div
-      className="min-h-[100dvh] flex flex-col"
+      className="min-h-[100vh] min-h-[100dvh] flex flex-col"
       style={{ background: "var(--surface)" }}
     >
       <div
-        className="px-4 py-3 flex items-center justify-between flex-shrink-0"
+        className="px-4 py-3 flex items-center justify-between flex-shrink-0 safe-top"
         style={{
           background: "var(--surface-2)",
           borderBottom: "1px solid var(--border)",
@@ -170,9 +182,11 @@ const Profile = () => {
       >
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate("/")}
+            onClick={handleBack}
             className="icon-btn -ml-1"
-            title="Back to chats"
+            title="Back"
+            aria-label="Back"
+            style={{ touchAction: "manipulation" }}
           >
             <ArrowLeft size={20} />
           </button>
@@ -424,19 +438,92 @@ const Profile = () => {
 
               <div>
                 <label className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]">
-                  Preferences & Safety
+                  Preferences & Appearance
                 </label>
                 <div className="space-y-2">
                   <div
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                      {theme === "dark" ? (
+                        <Moon size={15} className="text-indigo-400" />
+                      ) : (
+                        <Sun size={15} className="text-amber-500" />
+                      )}
+                      <span>Appearance</span>
+                    </div>
+
+                    <div
+                      role="radiogroup"
+                      aria-label="Theme selector"
+                      className="flex items-center p-1 rounded-lg gap-1 relative"
+                      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+                    >
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === "light"}
+                        aria-label="Light theme"
+                        onClick={() => setTheme("light")}
+                        className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${theme === "light"
+                            ? "text-[var(--primary-light)]"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                          }`}
+                      >
+                        <Sun size={13} />
+                        <span>Light</span>
+                        {theme === "light" && (
+                          <motion.div
+                            layoutId="theme-indicator"
+                            className="absolute inset-0 rounded-md -z-10 shadow-sm"
+                            style={{
+                              background: "var(--surface-3)",
+                              border: "1px solid var(--border-light)",
+                            }}
+                            transition={{ type: "spring", stiffness: 300, damping: 28 }}
+                          />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={theme === "dark"}
+                        aria-label="Dark theme"
+                        onClick={() => setTheme("dark")}
+                        className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${theme === "dark"
+                            ? "text-[var(--primary-light)]"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                          }`}
+                      >
+                        <Moon size={13} />
+                        <span>Dark</span>
+                        {theme === "dark" && (
+                          <motion.div
+                            layoutId="theme-indicator"
+                            className="absolute inset-0 rounded-md -z-10 shadow-sm"
+                            style={{
+                              background: "var(--surface-4)",
+                              border: "1px solid var(--border-light)",
+                            }}
+                            transition={{ type: "spring", stiffness: 300, damping: 28 }}
+                          />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
                     onClick={handleToggleNotifications}
-                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer hover:bg-[var(--hover)] transition-colors"
                     style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
                   >
                     <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
                       <Bell size={15} className="text-indigo-400" />
                       <span>Desktop Notifications</span>
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${notificationsEnabled ? "bg-green-500/20 text-green-400" : "bg-gray-700 text-gray-400"}`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${notificationsEnabled ? "bg-green-500/20 text-[var(--success-text)]" : "bg-[var(--surface-4)] text-[var(--text-muted)]"}`}>
                       {notificationsEnabled ? "Enabled" : "Disabled"}
                     </span>
                   </div>
@@ -486,7 +573,8 @@ const Profile = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "var(--overlay)", backdropFilter: "blur(8px)" }}
             onClick={() => setShowLogoutConfirm(false)}
           >
             <motion.div
@@ -496,17 +584,18 @@ const Profile = () => {
               className="glass-card p-6 max-w-sm w-full text-center"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center mx-auto mb-3 border border-red-500/20">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-3 border border-red-500/20">
                 <AlertTriangle size={24} />
               </div>
-              <h3 className="text-lg font-bold text-white mb-1">Confirm Sign Out</h3>
-              <p className="text-xs text-gray-400 mb-5">
+              <h3 className="text-lg font-bold mb-1" style={{ color: "var(--text-primary)" }}>Confirm Sign Out</h3>
+              <p className="text-xs mb-5" style={{ color: "var(--text-muted)" }}>
                 Are you sure you want to sign out of ChatHere?
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowLogoutConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors"
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                  style={{ background: "var(--surface-3)", color: "var(--text-secondary)" }}
                 >
                   Cancel
                 </button>

@@ -4,17 +4,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // Theme-aware: resolve to the CSS variables defined in src/index.css
         primary: {
-          DEFAULT: '#6366f1',
-          dark: '#4f46e5',
-          light: '#818cf8',
+          DEFAULT: 'var(--primary)',
+          dark: 'var(--primary-dark)',
+          light: 'var(--primary-light)',
         },
-        accent: '#a78bfa',
+        accent: 'var(--accent)',
         surface: {
-          DEFAULT: '#0f0f17',
-          2: '#16161f',
-          3: '#1e1e2e',
-          4: '#262636',
+          DEFAULT: 'var(--surface)',
+          2: 'var(--surface-2)',
+          3: 'var(--surface-3)',
+          4: 'var(--surface-4)',
         },
       },
       fontFamily: {

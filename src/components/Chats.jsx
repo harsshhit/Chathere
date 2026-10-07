@@ -1,23 +1,172 @@
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import React, { useContext, useEffect, useState, useRef, memo } from "react";
+import React, { useContext, useEffect, useState, useRef, memo, useCallback } from "react";
 import { MessageCircle, Archive, ArchiveRestore, ChevronLeft } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import { db } from "../firebase";
-import { useUI } from "../context/UIContext";
 import { showNotification, updateTitleUnread } from "../utils/notifications";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate, useParams } from "react-router-dom";
 import Avatar from "./Avatar";
+
+// Module-level scroll position cache so scroll position is preserved across navigation
+let savedChatListScroll = 0;
+
+const ChatItem = memo(function ChatItem({
+  chatId,
+  chat,
+  isActive,
+  hasUnread,
+  unreadCount,
+  isOwnLastMsg,
+  formattedDate,
+  onSelect,
+  onArchiveToggle,
+  canHover,
+  staggerDelay,
+}) {
+  return (
+    <motion.div
+      key={chatId}
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ delay: staggerDelay, duration: 0.2 }}
+      onClick={() => onSelect(chat.userInfo, chatId)}
+      className="flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-all duration-200 group relative"
+      style={{
+        background: isActive
+          ? "rgba(99,102,241,0.15)"
+          : hasUnread
+          ? "rgba(99,102,241,0.06)"
+          : "transparent",
+        borderLeft: isActive
+          ? "3px solid var(--primary)"
+          : hasUnread
+          ? "3px solid var(--primary-light)"
+          : "3px solid transparent",
+        touchAction: "manipulation",
+      }}
+      whileHover={
+        canHover
+          ? {
+              backgroundColor: isActive ? "rgba(99,102,241,0.15)" : "var(--hover)",
+            }
+          : undefined
+      }
+      whileTap={{ scale: 0.98 }}
+    >
+      <div className="relative flex-shrink-0">
+        <Avatar
+          src={chat.userInfo?.photoURL}
+          alt={chat.userInfo?.displayName}
+          className="w-12 h-12 rounded-2xl"
+          style={{
+            border: hasUnread
+              ? "2px solid var(--primary-light)"
+              : "1.5px solid rgba(99,102,241,0.25)",
+          }}
+        />
+        {hasUnread && (
+          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-primary border-2 border-[var(--surface-2)]" />
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0 pr-6">
+        <div className="flex justify-between items-baseline gap-2 mb-0.5">
+          <span
+            className={`text-sm truncate ${
+              hasUnread
+                ? "font-extrabold text-[var(--text-primary)]"
+                : "font-semibold text-[var(--text-primary)]"
+            }`}
+          >
+            {chat.userInfo?.displayName}
+          </span>
+          {formattedDate && (
+            <span
+              className={`text-[10px] flex-shrink-0 ${
+                hasUnread ? "font-bold text-[var(--unread-meta)]" : "text-[var(--text-muted)]"
+              }`}
+            >
+              {formattedDate}
+            </span>
+          )}
+        </div>
+
+        {chat.lastMessage ? (
+          <p
+            className={`text-xs truncate ${
+              hasUnread ? "font-bold text-[var(--unread-text)]" : "text-[var(--text-muted)]"
+            }`}
+          >
+            {isOwnLastMsg && <span style={{ color: "var(--primary-light)" }}>You: </span>}
+            {chat.lastMessage.text || "Sent an attachment"}
+          </p>
+        ) : (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            Start a conversation
+          </p>
+        )}
+      </div>
+
+      {hasUnread && (
+        <div className="flex-shrink-0 px-2 py-0.5 text-[11px] font-black rounded-full text-white bg-indigo-600 shadow-md shadow-indigo-600/40 animate-pulse">
+          {unreadCount}
+        </div>
+      )}
+
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        <button
+          onClick={(e) => onArchiveToggle(e, chatId, chat.isArchived)}
+          className="p-2 rounded-xl transition-all duration-200"
+          style={{
+            background: "var(--chip-bg)",
+            border: "1px solid var(--border-light)",
+            color: "var(--text-primary)",
+            touchAction: "manipulation",
+          }}
+          title={chat.isArchived ? "Unarchive chat" : "Archive chat"}
+          aria-label={chat.isArchived ? "Unarchive chat" : "Archive chat"}
+        >
+          {chat.isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+        </button>
+      </div>
+    </motion.div>
+  );
+});
 
 const Chats = () => {
   const [chats, setChats] = useState({});
-  const [activeChat, setActiveChat] = useState(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [canHover, setCanHover] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
-  const { dispatch } = useContext(ChatContext);
-  const { setIsMobileView } = useUI();
+  const { dispatch, data: activeChatData } = useContext(ChatContext);
+  const navigate = useNavigate();
+  const { chatId: routeChatId } = useParams();
+
   const prevChatsRef = useRef(null);
+  const isFirstRender = useRef(true);
+  const scrollContainerRef = useRef(null);
+
+  // Check hover capability once on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCanHover(window.matchMedia("(hover: hover)").matches);
+    }
+  }, []);
+
+  // Restore scroll position when returning from chat
+  useEffect(() => {
+    if (scrollContainerRef.current && savedChatListScroll > 0) {
+      scrollContainerRef.current.scrollTop = savedChatListScroll;
+    }
+  }, []);
+
+  const handleScroll = (e) => {
+    savedChatListScroll = e.currentTarget.scrollTop;
+  };
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -25,7 +174,7 @@ const Chats = () => {
     const unsub = onSnapshot(doc(db, "userChats", currentUser.uid), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() || {};
-        
+
         if (prevChatsRef.current) {
           Object.entries(data).forEach(([cId, cData]) => {
             const prevChat = prevChatsRef.current[cId];
@@ -35,7 +184,9 @@ const Chats = () => {
             const isNewMessage =
               newLastMsg &&
               newLastMsg.senderId !== currentUser.uid &&
-              (!prevLastMsg || prevLastMsg.text !== newLastMsg.text || prevLastMsg.date !== newLastMsg.date);
+              (!prevLastMsg ||
+                prevLastMsg.text !== newLastMsg.text ||
+                prevLastMsg.date !== newLastMsg.date);
 
             if (isNewMessage) {
               const senderName = cData.userInfo?.displayName || "New Message";
@@ -61,31 +212,52 @@ const Chats = () => {
     return () => unsub();
   }, [currentUser?.uid]);
 
-  const handleSelect = async (u, chatId) => {
-    dispatch({ type: "CHANGE_USER", payload: u });
-    setIsMobileView(false);
-    setActiveChat(chatId);
-    if (chats[chatId]?.unread > 0) {
+  const handleSelect = useCallback(
+    async (u, chatId) => {
+      // Save current scroll position
+      if (scrollContainerRef.current) {
+        savedChatListScroll = scrollContainerRef.current.scrollTop;
+      }
+
+      // Derive standard chatId
+      const targetChatId = u.isGroup
+        ? u.uid
+        : currentUser.uid > u.uid
+        ? currentUser.uid + u.uid
+        : u.uid + currentUser.uid;
+
+      // Prime chat context immediately
+      dispatch({ type: "SET_CHAT", payload: { chatId: targetChatId, user: u } });
+
+      // Navigate to URL
+      navigate(`/chat/${targetChatId}`);
+
+      if (chats[chatId]?.unread > 0) {
+        try {
+          await updateDoc(doc(db, "userChats", currentUser.uid), {
+            [`${chatId}.unread`]: 0,
+          });
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    },
+    [currentUser?.uid, dispatch, navigate, chats]
+  );
+
+  const handleArchiveToggle = useCallback(
+    async (e, chatId, currentStatus) => {
+      e.stopPropagation();
       try {
         await updateDoc(doc(db, "userChats", currentUser.uid), {
-          [`${chatId}.unread`]: 0,
+          [`${chatId}.isArchived`]: !currentStatus,
         });
       } catch (err) {
         console.error(err);
       }
-    }
-  };
-
-  const handleArchiveToggle = async (e, chatId, currentStatus) => {
-    e.stopPropagation();
-    try {
-      await updateDoc(doc(db, "userChats", currentUser.uid), {
-        [`${chatId}.isArchived`]: !currentStatus,
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  };
+    },
+    [currentUser?.uid]
+  );
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
@@ -119,17 +291,33 @@ const Chats = () => {
 
   const unarchivedChats = sortedChats.filter(([_, chat]) => !chat.isArchived);
   const archivedChats = sortedChats.filter(([_, chat]) => chat.isArchived);
-
   const displayedChats = showArchived ? archivedChats : unarchivedChats;
 
+  // After first render, disable the staggered entrance delay
+  useEffect(() => {
+    if (displayedChats.length > 0) {
+      isFirstRender.current = false;
+    }
+  }, [displayedChats.length]);
+
+  const activeChatId = routeChatId || activeChatData?.chatId;
+
   return (
-    <div className="flex-1 overflow-y-auto py-2 flex flex-col" style={{ background: "var(--surface-2)" }}>
+    <div
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto py-2 flex flex-col overscroll-contain"
+      style={{ background: "var(--surface-2)", overscrollBehavior: "contain" }}
+    >
       {showArchived && (
-        <div className="px-4 py-2 mb-2 flex items-center w-full" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <button 
-            onClick={() => setShowArchived(false)} 
+        <div
+          className="px-4 py-2 mb-2 flex items-center w-full"
+          style={{ borderBottom: "1px solid var(--border)" }}
+        >
+          <button
+            onClick={() => setShowArchived(false)}
             className="flex items-center gap-2 text-sm font-medium transition-colors"
-            style={{ color: "var(--primary-light)" }}
+            style={{ color: "var(--primary-light)", touchAction: "manipulation" }}
           >
             <ChevronLeft size={16} /> Back to Chats
           </button>
@@ -137,20 +325,27 @@ const Chats = () => {
       )}
 
       {!showArchived && archivedChats.length > 0 && (
-        <div 
+        <div
           onClick={() => setShowArchived(true)}
           className="flex items-center justify-between px-4 py-3 mx-2 mb-2 rounded-xl cursor-pointer transition-colors duration-200"
-          style={{ background: "rgba(255,255,255,0.03)" }}
+          style={{ background: "var(--subtle)", touchAction: "manipulation" }}
         >
           <div className="flex items-center gap-3">
             <Archive size={18} style={{ color: "var(--text-muted)" }} />
-            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>Archived</span>
+            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+              Archived
+            </span>
           </div>
-          <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--surface-3)", color: "var(--primary-light)" }}>{archivedChats.length}</span>
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: "var(--surface-3)", color: "var(--primary-light)" }}
+          >
+            {archivedChats.length}
+          </span>
         </div>
       )}
 
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="popLayout">
         {displayedChats.length === 0 ? (
           <motion.div
             key="empty-state"
@@ -179,91 +374,45 @@ const Chats = () => {
             )}
           </motion.div>
         ) : (
-          <motion.div key="chat-list" className="space-y-0.5 px-2 pb-4">
+          <div key="chat-list" className="space-y-0.5 px-2 pb-4">
             {displayedChats.map(([chatId, chat], index) => {
               const unreadCount = chat.unread || 0;
               const hasUnread = unreadCount > 0;
+              const isGroup = chat.userInfo?.isGroup;
+              const userUid = chat.userInfo?.uid;
+
+              const derivedChatId = isGroup
+                ? userUid
+                : currentUser?.uid && userUid
+                ? currentUser.uid > userUid
+                  ? currentUser.uid + userUid
+                  : userUid + currentUser.uid
+                : chatId;
+
+              const isActive =
+                activeChatId === chatId || activeChatId === derivedChatId;
+
+              const staggerDelay =
+                isFirstRender.current && index < 10 ? index * 0.025 : 0;
+
               return (
-                <motion.div
+                <ChatItem
                   key={chatId}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ delay: index * 0.03, duration: 0.25 }}
-                  onClick={() => handleSelect(chat.userInfo, chatId)}
-                  className="flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-all duration-200 group relative"
-                  style={{
-                    background: activeChat === chatId ? "rgba(99,102,241,0.15)" : (hasUnread ? "rgba(99,102,241,0.06)" : "transparent"),
-                    borderLeft: activeChat === chatId ? "3px solid var(--primary)" : (hasUnread ? "3px solid var(--primary-light)" : "3px solid transparent"),
-                  }}
-                  whileHover={{
-                    backgroundColor: activeChat === chatId ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <div className="relative flex-shrink-0">
-                    <Avatar
-                      src={chat.userInfo?.photoURL}
-                      alt={chat.userInfo?.displayName}
-                      className="w-12 h-12 rounded-2xl"
-                      style={{
-                        border: hasUnread ? "2px solid var(--primary-light)" : "1.5px solid rgba(99,102,241,0.25)",
-                      }}
-                    />
-                    {hasUnread && (
-                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-[var(--surface-2)]" />
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0 pr-6">
-                    <div className="flex justify-between items-baseline gap-2 mb-0.5">
-                      <span
-                        className={`text-sm truncate ${hasUnread ? "font-extrabold text-white" : "font-semibold text-[var(--text-primary)]"}`}
-                      >
-                        {chat.userInfo?.displayName}
-                      </span>
-                      {chat.date && (
-                        <span className={`text-[10px] flex-shrink-0 ${hasUnread ? "font-bold text-indigo-300" : "text-[var(--text-muted)]"}`}>
-                          {formatTimestamp(chat.date)}
-                        </span>
-                      )}
-                    </div>
-
-                    {chat.lastMessage ? (
-                      <p className={`text-xs truncate ${hasUnread ? "font-bold text-indigo-200" : "text-[var(--text-muted)]"}`}>
-                        {chat.lastMessage.senderId === currentUser.uid && (
-                          <span style={{ color: "var(--primary-light)" }}>You: </span>
-                        )}
-                        {chat.lastMessage.text || "Sent a message"}
-                      </p>
-                    ) : (
-                      <p className="text-xs" style={{ color: "var(--text-muted)" }}>Start a conversation</p>
-                    )}
-                  </div>
-
-                  {hasUnread && (
-                    <div className="flex-shrink-0 px-2 py-0.5 text-[11px] font-black rounded-full text-white bg-indigo-600 shadow-md shadow-indigo-600/40 animate-pulse">
-                      {unreadCount}
-                    </div>
-                  )}
-
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <button
-                      onClick={(e) => handleArchiveToggle(e, chatId, chat.isArchived)}
-                      className="p-2 rounded-xl transition-all duration-200"
-                      style={{ 
-                        background: "rgba(0,0,0,0.5)", 
-                        backdropFilter: "blur(4px)",
-                        border: "1px solid rgba(255,255,255,0.1)"
-                      }}
-                      title={chat.isArchived ? "Unarchive chat" : "Archive chat"}
-                    >
-                      {chat.isArchived ? <ArchiveRestore size={16} className="text-white" /> : <Archive size={16} className="text-white" />}
-                    </button>
-                  </div>
-                </motion.div>
+                  chatId={chatId}
+                  chat={chat}
+                  isActive={isActive}
+                  hasUnread={hasUnread}
+                  unreadCount={unreadCount}
+                  isOwnLastMsg={chat.lastMessage?.senderId === currentUser.uid}
+                  formattedDate={formatTimestamp(chat.date)}
+                  onSelect={handleSelect}
+                  onArchiveToggle={handleArchiveToggle}
+                  canHover={canHover}
+                  staggerDelay={staggerDelay}
+                />
               );
             })}
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

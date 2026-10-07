@@ -17,6 +17,7 @@ import { v4 as uuid } from "uuid";
 import EmojiPicker from "emoji-picker-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GifPicker from "./GifPicker";
+import { useTheme } from "../context/ThemeContext";
 
 const Input = () => {
   const [text, setText] = useState("");
@@ -26,6 +27,7 @@ const Input = () => {
 
   const { currentUser } = useContext(AuthContext);
   const { data } = useContext(ChatContext);
+  const { theme } = useTheme();
   const pickerRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -35,7 +37,7 @@ const Input = () => {
     if (data.chatId) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: false
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -191,12 +193,12 @@ const Input = () => {
   const onEmojiClick = (emojiObject) => {
     setText((prev) => prev + emojiObject.emoji);
     inputRef.current?.focus();
-    
+
     if (data.chatId && !isLoading) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: true
-      }).catch(() => {});
-      
+      }).catch(() => { });
+
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         stopTyping();
@@ -206,12 +208,12 @@ const Input = () => {
 
   const handleTyping = (e) => {
     setText(e.target.value);
-    
+
     if (data.chatId && !isLoading) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: true
-      }).catch(() => {});
-      
+      }).catch(() => { });
+
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = setTimeout(() => {
         stopTyping();
@@ -219,20 +221,36 @@ const Input = () => {
     }
   };
 
+  const [canHover, setCanHover] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setCanHover(window.matchMedia("(hover: hover)").matches);
+    }
+  }, []);
+
   return (
     <div
-      className="px-3 py-3 sm:px-4 sm:py-3.5"
-      style={{ background: "var(--surface-2)" }}
+      className="px-3 py-3 sm:px-4 sm:py-3.5 safe-bottom"
+      style={{
+        background: "var(--surface-2)",
+        paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+      }}
     >
       <div className="flex items-center gap-2">
         <motion.button
           type="button"
-          whileHover={{ scale: 1.05 }}
+          whileHover={canHover ? { scale: 1.05 } : undefined}
           whileTap={{ scale: 0.95 }}
           onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
           className="icon-btn flex-shrink-0 cursor-pointer font-bold tracking-widest text-[11px]"
           title="Send GIF"
-          style={{ width: "42px", height: "42px", color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)" }}
+          style={{
+            width: "42px",
+            height: "42px",
+            color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)",
+            touchAction: "manipulation",
+          }}
         >
           GIF
         </motion.button>
@@ -243,6 +261,7 @@ const Input = () => {
             onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
             className="absolute left-4 top-1/2 -translate-y-1/2 z-10 transition-colors duration-200"
             style={{ color: showEmojiPicker ? "var(--primary-light)" : "var(--text-muted)" }}
+            aria-label="Emoji picker"
           >
             <Smile size={18} />
           </button>
@@ -256,14 +275,14 @@ const Input = () => {
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
                 className="absolute bottom-full left-0 mb-2 z-50"
-                style={{ boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
+                style={{ boxShadow: "0 20px 60px var(--shadow)" }}
               >
                 {showEmojiPicker ? (
                   <EmojiPicker
                     onEmojiClick={onEmojiClick}
                     width={300}
                     height={380}
-                    theme="dark"
+                    theme={theme === "dark" ? "dark" : "light"}
                     lazyLoadEmojis
                   />
                 ) : (
@@ -287,12 +306,14 @@ const Input = () => {
         </div>
 
         <motion.button
-          whileHover={!text.trim() || isLoading ? {} : { scale: 1.05 }}
+          whileHover={canHover && text.trim() && !isLoading ? { scale: 1.05 } : undefined}
           whileTap={!text.trim() || isLoading ? {} : { scale: 0.95 }}
           onClick={handleSend}
           disabled={!text.trim() || isLoading}
           className="send-btn flex-shrink-0"
           id="chat-send-btn"
+          aria-label="Send message"
+          style={{ touchAction: "manipulation" }}
         >
           {isLoading ? (
             <Loader2 size={20} className="animate-spin" />

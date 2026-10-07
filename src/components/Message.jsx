@@ -129,7 +129,7 @@ const Message = ({ message, lastRead }) => {
 
       <div className={`flex flex-col gap-1.5 max-w-[72%] sm:max-w-[65%] ${isOwn ? "items-end" : "items-start"}`}>
         {!isOwn && data.user?.isGroup && (
-          <span className="text-[10px] text-gray-400 font-medium pl-1">
+          <span className="text-[10px] text-[var(--text-secondary)] font-medium pl-1">
             {message.senderName || "Unknown"}
           </span>
         )}
@@ -148,12 +148,14 @@ const Message = ({ message, lastRead }) => {
               onClick={handleSaveEdit}
               disabled={savingEdit}
               className="p-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500"
+              aria-label="Save edit"
             >
               <SaveIcon size={14} />
             </button>
             <button
               onClick={() => setIsEditing(false)}
-              className="p-1 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600"
+              className="p-1 rounded-lg bg-[var(--surface-4)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              aria-label="Cancel edit"
             >
               <X size={14} />
             </button>
@@ -168,18 +170,16 @@ const Message = ({ message, lastRead }) => {
             >
               {message.text}
               <span
-                className={`flex items-center gap-1 justify-end text-[10px] mt-1 ${
-                  isOwn ? "text-indigo-200/70" : "opacity-50"
-                }`}
-                style={{ color: isOwn ? "rgba(255,255,255,0.5)" : "var(--text-muted)" }}
+                className="flex items-center gap-1 justify-end text-[10px] mt-1"
+                style={{ color: isOwn ? "rgba(255,255,255,0.85)" : "var(--bubble-received-meta)" }}
               >
                 {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
                 {formatDate(message.date)}
                 {isOwn && (
                   isRead ? (
-                    <CheckCheck size={14} className="text-blue-400 opacity-90" />
+                    <CheckCheck size={14} style={{ color: "#bae6fd" }} aria-label="Read" />
                   ) : (
-                    <Check size={14} className="opacity-60" />
+                    <Check size={14} aria-label="Sent" />
                   )
                 )}
               </span>
@@ -201,8 +201,18 @@ const Message = ({ message, lastRead }) => {
                 isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
               }`}
               style={{
-                border: "1px solid rgba(255,255,255,0.08)",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+                border: "1px solid var(--border)",
+                boxShadow: "0 8px 32px var(--shadow)",
+              }}
+              onError={(e) => {
+                // Replace broken GIF (e.g. old Tenor URLs) with a friendly placeholder
+                e.currentTarget.onerror = null;
+                e.currentTarget.style.display = "none";
+                const placeholder = document.createElement("div");
+                placeholder.style.cssText =
+                  "display:flex;align-items:center;justify-content:center;padding:12px 16px;border-radius:12px;font-size:11px;color:var(--text-muted);background:var(--surface-3);border:1px solid var(--border);min-width:120px;text-align:center;";
+                placeholder.textContent = "GIF unavailable";
+                e.currentTarget.parentNode?.insertBefore(placeholder, e.currentTarget.nextSibling);
               }}
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200 rounded-2xl flex items-center justify-center">
@@ -254,16 +264,18 @@ const Message = ({ message, lastRead }) => {
           {message.text && (
             <button
               onClick={() => setIsEditing(true)}
-              className="p-1 rounded-lg text-gray-400 hover:text-indigo-300 hover:bg-white/5 transition-colors"
+              className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors"
               title="Edit message"
+              aria-label="Edit message"
             >
               <Edit2 size={13} />
             </button>
           )}
           <button
             onClick={handleDelete}
-            className="p-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-white/5 transition-colors"
+            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--danger-text)] hover:bg-[var(--hover)] transition-colors"
             title="Delete message"
+            aria-label="Delete message"
           >
             <Trash2 size={13} />
           </button>

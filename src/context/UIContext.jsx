@@ -1,15 +1,14 @@
-import { createContext, useState, useContext } from 'react';
+import { createContext, useContext } from 'react';
 
-export const UIContext = createContext();
+// UIContext is kept minimal — navigation is URL-driven.
+// isMobileView state has been removed; layout is determined by CSS breakpoints + URL.
+// Components should use useNavigate() for navigation and read the :chatId param from the URL.
+export const UIContext = createContext({});
 
-export const UIProvider = ({ children }) => {
-  const [isMobileView, setIsMobileView] = useState(true);
+export const UIProvider = ({ children }) => (
+  <UIContext.Provider value={{}}>
+    {children}
+  </UIContext.Provider>
+);
 
-  return (
-    <UIContext.Provider value={{ isMobileView, setIsMobileView }}>
-      {children}
-    </UIContext.Provider>
-  );
-};
-
-export const useUI = () => useContext(UIContext); 
+export const useUI = () => useContext(UIContext);

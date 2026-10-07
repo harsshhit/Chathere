@@ -101,7 +101,11 @@ const CreateGroup = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 modal-overlay"
+      style={{ background: "var(--overlay)" }}
+      onClick={onClose}
+    >
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -114,13 +118,17 @@ const CreateGroup = ({ onClose }) => {
           <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
             <Users size={20} className="text-indigo-400" /> New Group
           </h2>
-          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-lg text-gray-400 transition-colors">
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-[var(--hover)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            aria-label="Close"
+          >
             <X size={18} />
           </button>
         </div>
 
         <div>
-          <label className="block text-[10px] uppercase text-gray-400 mb-1.5 font-bold tracking-wider">Group Name</label>
+          <label className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Group Name</label>
           <input 
             type="text" 
             placeholder="E.g., Weekend Plans" 
@@ -133,9 +141,9 @@ const CreateGroup = ({ onClose }) => {
         </div>
 
         <div>
-          <label className="block text-[10px] uppercase text-gray-400 mb-1.5 font-bold tracking-wider">Add Members ({selectedUsers.length})</label>
+          <label className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Add Members ({selectedUsers.length})</label>
           <div className="relative mb-3">
-             <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+             <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
              <input 
                type="text"
                placeholder="Search users..."
@@ -159,12 +167,12 @@ const CreateGroup = ({ onClose }) => {
                      <div 
                        key={user.uid} 
                        onClick={() => toggleUser(user)}
-                       className="flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-colors hover:bg-white/5"
+                       className="flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-colors hover:bg-[var(--hover)]"
                        style={{ background: isSelected ? "rgba(99,102,241,0.15)" : "transparent" }}
                      >
                        <Avatar src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
-                       <span className="flex-1 text-sm font-medium">{user.displayName}</span>
-                       <div className="w-5 h-5 rounded border border-gray-600 flex items-center justify-center transition-colors" style={{ background: isSelected ? "var(--primary)" : "transparent", borderColor: isSelected ? "var(--primary)" : "var(--border)" }}>
+                       <span className="flex-1 text-sm font-medium text-[var(--text-primary)]">{user.displayName}</span>
+                       <div className="w-5 h-5 rounded border flex items-center justify-center transition-colors" style={{ background: isSelected ? "var(--primary)" : "transparent", borderColor: isSelected ? "var(--primary)" : "var(--border-light)" }}>
                          {isSelected && <Check size={12} className="text-white" />}
                        </div>
                      </div>
@@ -172,9 +180,9 @@ const CreateGroup = ({ onClose }) => {
                  })}
                </div>
             ) : searchTerm ? (
-               <p className="text-center text-xs text-gray-500 mt-6">No users found</p>
+               <p className="text-center text-xs text-[var(--text-muted)] mt-6">No users found</p>
             ) : (
-               <p className="text-center text-xs text-gray-500 mt-6">Search to add members</p>
+               <p className="text-center text-xs text-[var(--text-muted)] mt-6">Search to add members</p>
             )}
           </div>
         </div>
