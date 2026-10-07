@@ -13,7 +13,7 @@
 | Repo | https://github.com/harsshhit/Chathere |
 | Live | https://chat-here-eta.vercel.app (hosted on **Vercel**) |
 | Dev OS | Windows, PowerShell |
-| Node | `20.x` (set in `package.json` `engines`) |
+| Node | `24.x` (set in `package.json` `engines`) |
 | Run | `npm start` (dev, port 3000) · `npm run build` (prod) |
 
 ---
