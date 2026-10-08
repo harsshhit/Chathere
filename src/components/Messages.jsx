@@ -4,7 +4,6 @@ import { ChatContext } from "../context/ChatContext";
 import { AuthContext } from "../context/AuthContext";
 import { db } from "../firebase";
 import Message from "./Message";
-import { showNotification, requestNotificationPermission } from "../utils/notifications";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 
@@ -31,7 +30,8 @@ const Messages = () => {
   const isAutoScrollingRef = useRef(false);
 
   const markAsReadIfFocused = useCallback((newMessages, currentLastRead) => {
-    if (document.hasFocus() && newMessages.length > 0 && data.chatId) {
+    const isVisible = typeof document === "undefined" || document.visibilityState === "visible";
+    if (isVisible && newMessages.length > 0 && data.chatId) {
       const latestMsg = newMessages[newMessages.length - 1];
       if (latestMsg.senderId !== currentUser.uid) {
         const myLastRead = currentLastRead?.[currentUser.uid];
@@ -56,8 +56,6 @@ const Messages = () => {
   }, []);
 
   useEffect(() => {
-    requestNotificationPermission();
-
     if (!data.chatId) return;
 
     // Reset scroll tracking and message state when switching chats
@@ -84,16 +82,6 @@ const Messages = () => {
         setMessages(newMessages);
         setTyping(docData.typing || {});
         setLastRead(currentLastRead);
-
-        if (newMessages.length > previousMessagesLength.current) {
-          const latestMessage = newMessages[newMessages.length - 1];
-          if (latestMessage && latestMessage.senderId !== currentUser.uid && !document.hasFocus()) {
-            showNotification(data.user?.displayName || "New Message", {
-              body: latestMessage.text || (latestMessage.img ? "Sent an image" : "New message received"),
-              tag: data.chatId,
-            });
-          }
-        }
         previousMessagesLength.current = newMessages.length;
 
         markAsReadIfFocused(newMessages, currentLastRead);
@@ -101,14 +89,20 @@ const Messages = () => {
     });
 
     return () => unSub();
-  }, [data.chatId, data.user?.displayName, currentUser.uid, markAsReadIfFocused]);
+  }, [data.chatId, currentUser.uid, markAsReadIfFocused]);
 
   useEffect(() => {
-    const handleFocus = () => {
-      markAsReadIfFocused(messages, lastRead);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        markAsReadIfFocused(messages, lastRead);
+      }
     };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
   }, [messages, lastRead, markAsReadIfFocused]);
 
   // Check if user is scrolled near bottom (within 120px)

@@ -1,4 +1,4 @@
-import { Route, BrowserRouter, Routes, Navigate } from "react-router-dom";
+import { Route, BrowserRouter, Routes, Navigate, useNavigate } from "react-router-dom";
 import { useContext, lazy, Suspense, useEffect } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { UIProvider } from "./context/UIContext";
@@ -28,6 +28,28 @@ function ChunkPreloader() {
   return null;
 }
 
+// Listen for service worker notification clicks and navigate to the target chat
+function ServiceWorkerMessageListener() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+
+    const handleMessage = (event) => {
+      if (event.data?.type === "OPEN_CHAT" && event.data.chatId) {
+        navigate(`/chat/${event.data.chatId}`);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener("message", handleMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", handleMessage);
+    };
+  }, [navigate]);
+
+  return null;
+}
+
 // Lightweight skeleton instead of full-screen spinner
 const LoadingFallback = () => (
   <div
@@ -54,6 +76,7 @@ const App = () => {
       >
         <ChatContextProvider>
           <ChunkPreloader />
+          <ServiceWorkerMessageListener />
           <Suspense fallback={<LoadingFallback />}>
           <Routes>
             {/*

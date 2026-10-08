@@ -4,7 +4,7 @@ import { MessageCircle, Archive, ArchiveRestore, ChevronLeft } from "lucide-reac
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import { db } from "../firebase";
-import { showNotification, updateTitleUnread } from "../utils/notifications";
+import { notifyMessage } from "../utils/notify";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
 import Avatar from "./Avatar";
@@ -147,8 +147,17 @@ const Chats = () => {
   const { chatId: routeChatId } = useParams();
 
   const prevChatsRef = useRef(null);
+  const isFirstSnapshot = useRef(true);
   const isFirstRender = useRef(true);
+  const notifiedMessageIdsRef = useRef(new Set());
   const scrollContainerRef = useRef(null);
+
+  const currentOpenChatId = activeChatData?.chatId || routeChatId || null;
+  const openChatIdRef = useRef(currentOpenChatId);
+
+  useEffect(() => {
+    openChatIdRef.current = currentOpenChatId;
+  }, [currentOpenChatId]);
 
   // Check hover capability once on mount
   useEffect(() => {
@@ -168,6 +177,29 @@ const Chats = () => {
     savedChatListScroll = e.currentTarget.scrollTop;
   };
 
+  // Synchronize document.title with unread count while hidden; reset when visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible") {
+        document.title = "ChatHere";
+      } else {
+        const totalUnread = Object.values(chats).reduce(
+          (acc, c) => acc + (c?.unread || 0),
+          0
+        );
+        if (totalUnread > 0) {
+          document.title = `(${totalUnread}) ChatHere`;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [chats]);
+
   useEffect(() => {
     if (!currentUser?.uid) return;
 
@@ -175,37 +207,86 @@ const Chats = () => {
       if (docSnap.exists()) {
         const data = docSnap.data() || {};
 
-        if (prevChatsRef.current) {
+        // Ignore the initial snapshot load so existing messages do not trigger notifications
+        if (isFirstSnapshot.current) {
+          isFirstSnapshot.current = false;
+          prevChatsRef.current = data;
+
+          // Seed notified IDs set with current snapshot messages
           Object.entries(data).forEach(([cId, cData]) => {
-            const prevChat = prevChatsRef.current[cId];
-            const newLastMsg = cData?.lastMessage;
-            const prevLastMsg = prevChat?.lastMessage;
-
-            const isNewMessage =
-              newLastMsg &&
-              newLastMsg.senderId !== currentUser.uid &&
-              (!prevLastMsg ||
-                prevLastMsg.text !== newLastMsg.text ||
-                prevLastMsg.date !== newLastMsg.date);
-
-            if (isNewMessage) {
-              const senderName = cData.userInfo?.displayName || "New Message";
-              const messageText = newLastMsg.text || "Sent a message";
-              showNotification(senderName, {
-                body: messageText,
-                tag: cId,
-              });
+            const msg = cData?.lastMessage;
+            if (msg) {
+              const msgTime = typeof msg.date === "number"
+                ? msg.date
+                : msg.date?.toMillis
+                ? msg.date.toMillis()
+                : msg.date?.seconds
+                ? msg.date.seconds * 1000
+                : 0;
+              const msgId = msg.id || `${cId}_${msgTime}_${msg.senderId}_${msg.text || ""}`;
+              notifiedMessageIdsRef.current.add(msgId);
             }
           });
-        }
-        prevChatsRef.current = data;
 
+          setChats(data);
+          return;
+        }
+
+        // Process incoming chat updates
+        Object.entries(data).forEach(([cId, cData]) => {
+          const newLastMsg = cData?.lastMessage;
+          if (!newLastMsg) return;
+
+          const msgTime = typeof newLastMsg.date === "number"
+            ? newLastMsg.date
+            : newLastMsg.date?.toMillis
+            ? newLastMsg.date.toMillis()
+            : newLastMsg.date?.seconds
+            ? newLastMsg.date.seconds * 1000
+            : 0;
+
+          // Ignore messages older than ~30 seconds when reattaching or coming back from background
+          const isOlderThan30s = msgTime > 0 && Date.now() - msgTime > 30000;
+          const msgId = newLastMsg.id || `${cId}_${msgTime}_${newLastMsg.senderId}_${newLastMsg.text || ""}`;
+
+          const isNotMe = newLastMsg.senderId !== currentUser.uid;
+          const isHiddenOrNotCurrentChat =
+            (typeof document !== "undefined" && document.visibilityState === "hidden") ||
+            cId !== openChatIdRef.current;
+          const notYetNotified = !notifiedMessageIdsRef.current.has(msgId);
+
+          if (isNotMe && isHiddenOrNotCurrentChat && notYetNotified && !isOlderThan30s) {
+            notifiedMessageIdsRef.current.add(msgId);
+            const senderName = cData.userInfo?.displayName || "New Message";
+            const messageText = newLastMsg.text || "Sent a message";
+
+            notifyMessage({
+              chatId: cId,
+              title: senderName,
+              body: messageText,
+              icon: cData.userInfo?.photoURL || "/icon-192.png",
+            });
+          } else {
+            // Keep tracked to prevent repeat alerts
+            notifiedMessageIdsRef.current.add(msgId);
+          }
+        });
+
+        prevChatsRef.current = data;
         setChats(data);
+
+        // Update document title fallback while hidden
         const totalUnread = Object.values(data).reduce(
           (acc, c) => acc + (c?.unread || 0),
           0
         );
-        updateTitleUnread(totalUnread);
+        if (typeof document !== "undefined") {
+          if (document.visibilityState === "hidden" && totalUnread > 0) {
+            document.title = `(${totalUnread}) ChatHere`;
+          } else if (document.visibilityState === "visible") {
+            document.title = "ChatHere";
+          }
+        }
       }
     });
 

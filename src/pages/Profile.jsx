@@ -15,6 +15,9 @@ import {
   AlertTriangle,
   Sun,
   Moon,
+  Send,
+  Share2,
+  PlusSquare,
 } from "lucide-react";
 import {
   getStorage,
@@ -29,7 +32,13 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import Avatar from "../components/Avatar";
-import { requestNotificationPermission } from "../utils/notifications";
+import {
+  getPermissionState,
+  requestNotificationPermission,
+  notifyMessage,
+  isIOS,
+  isStandalone,
+} from "../utils/notify";
 import { useTheme } from "../context/ThemeContext";
 
 const Profile = () => {
@@ -48,9 +57,14 @@ const Profile = () => {
   const [savingName, setSavingName] = useState(false);
   const [savingBio, setSavingBio] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(
-    Notification?.permission === "granted"
-  );
+  const [permissionState, setPermissionState] = useState(() => getPermissionState());
+  const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
+  const [testNotificationSent, setTestNotificationSent] = useState(false);
+
+  useEffect(() => {
+    setPermissionState(getPermissionState());
+    setIsIOSNonStandalone(isIOS() && !isStandalone());
+  }, []);
 
   useEffect(() => {
     const fetchBio = async () => {
@@ -139,8 +153,27 @@ const Profile = () => {
   };
 
   const handleToggleNotifications = async () => {
-    const granted = await requestNotificationPermission();
-    setNotificationsEnabled(granted);
+    if (isIOSNonStandalone) return;
+    if (permissionState === "granted" || permissionState === "denied" || permissionState === "unsupported") {
+      return;
+    }
+    await requestNotificationPermission();
+    setPermissionState(getPermissionState());
+  };
+
+  const handleSendTestNotification = async () => {
+    try {
+      await notifyMessage({
+        chatId: "test-preview",
+        title: "ChatHere Test",
+        body: "Sample notification! Sound, vibration, and service worker are functioning properly.",
+        icon: "/icon-192.png",
+      });
+      setTestNotificationSent(true);
+      setTimeout(() => setTestNotificationSent(false), 3000);
+    } catch (err) {
+      console.warn("Failed to send test notification:", err);
+    }
   };
 
   const handleLogout = async () => {
@@ -515,17 +548,80 @@ const Profile = () => {
                   </div>
 
                   <div
-                    onClick={handleToggleNotifications}
-                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer hover:bg-[var(--hover)] transition-colors"
+                    className="p-3 rounded-xl space-y-2.5 transition-colors"
                     style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
                   >
-                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                      <Bell size={15} className="text-indigo-400" />
-                      <span>Desktop Notifications</span>
+                    <div
+                      onClick={handleToggleNotifications}
+                      className={`flex items-center justify-between ${
+                        permissionState === "default" && !isIOSNonStandalone
+                          ? "cursor-pointer hover:opacity-90"
+                          : ""
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                        <Bell size={15} className="text-indigo-400" />
+                        <span>Message Notifications</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isIOSNonStandalone ? (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
+                            PWA Required
+                          </span>
+                        ) : permissionState === "granted" ? (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-500/20 text-[var(--success-text)]">
+                            Enabled
+                          </span>
+                        ) : permissionState === "denied" ? (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500/20 text-red-400">
+                            Blocked
+                          </span>
+                        ) : permissionState === "unsupported" ? (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--surface-4)] text-[var(--text-muted)]">
+                            Not supported
+                          </span>
+                        ) : (
+                          <button
+                            onClick={handleToggleNotifications}
+                            className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+                          >
+                            Enable
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${notificationsEnabled ? "bg-green-500/20 text-[var(--success-text)]" : "bg-[var(--surface-4)] text-[var(--text-muted)]"}`}>
-                      {notificationsEnabled ? "Enabled" : "Disabled"}
-                    </span>
+
+                    {/* Contextual hints depending on real permission state */}
+                    {isIOSNonStandalone ? (
+                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
+                        On iPhone, add ChatHere to your Home Screen to get notifications: tap <Share2 size={12} className="inline text-indigo-400 mx-0.5" /> Share &gt; <PlusSquare size={12} className="inline text-indigo-400 mx-0.5" /> Add to Home Screen.
+                      </div>
+                    ) : permissionState === "denied" ? (
+                      <div className="text-xs text-red-400/90 pt-1 border-t border-[var(--border)] leading-relaxed">
+                        Notifications are blocked by your browser. To unblock, tap the lock/tune icon in your browser address bar and allow notifications for this site.
+                      </div>
+                    ) : permissionState === "unsupported" ? (
+                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
+                        Your browser does not support web notifications or service workers.
+                      </div>
+                    ) : null}
+
+                    {/* Step 6 Debug Tooling: Test notification button when granted */}
+                    {permissionState === "granted" && (
+                      <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between">
+                        <span className="text-xs text-[var(--text-muted)]">
+                          Test OS-level alert & chime
+                        </span>
+                        <button
+                          onClick={handleSendTestNotification}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
+                          style={{ touchAction: "manipulation" }}
+                        >
+                          <Send size={11} />
+                          <span>{testNotificationSent ? "Notification sent!" : "Send test notification"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div
