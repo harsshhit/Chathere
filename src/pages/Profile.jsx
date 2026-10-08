@@ -1,4 +1,4 @@
-import React, { useContext, useRef, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -18,13 +18,8 @@ import {
   Send,
   Share2,
   PlusSquare,
+  Download,
 } from "lucide-react";
-import {
-  getStorage,
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-} from "firebase/storage";
 import { updateProfile } from "firebase/auth";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
@@ -32,6 +27,8 @@ import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import Avatar from "../components/Avatar";
+import AvatarPicker from "../components/AvatarPicker";
+import { useInstall } from "../context/InstallContext";
 import {
   getPermissionState,
   requestNotificationPermission,
@@ -42,9 +39,9 @@ import {
 import { useTheme } from "../context/ThemeContext";
 
 const Profile = () => {
-  const { currentUser } = useContext(AuthContext);
+  const { currentUser, updateAuthUser } = useContext(AuthContext);
   const { theme, setTheme } = useTheme();
-  const fileInputRef = useRef(null);
+  const { canInstall, isInstalled, promptInstall, isIOS: isInstallIOS } = useInstall();
   const navigate = useNavigate();
 
   const [isEditingName, setIsEditingName] = useState(false);
@@ -52,8 +49,7 @@ const Profile = () => {
   const [newDisplayName, setNewDisplayName] = useState(currentUser.displayName || "");
   const [bio, setBio] = useState("");
   const [newBio, setNewBio] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [savingBio, setSavingBio] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -82,41 +78,38 @@ const Profile = () => {
     if (currentUser?.uid) fetchBio();
   }, [currentUser?.uid]);
 
-  const handleImageChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      alert("File size must be under 5MB");
-      return;
-    }
-    setUploading(true);
-    setUploadProgress(0);
+  const handleSaveAvatar = async (newPhotoURL) => {
+    // 1. Update Firebase Auth user
+    await updateProfile(auth.currentUser, { photoURL: newPhotoURL });
+
+    // 2. Update Firestore users/{uid}
+    await updateDoc(doc(db, "users", auth.currentUser.uid), {
+      photoURL: newPhotoURL,
+    });
+
+    // 3. Update current user's userChats entries where user info is denormalized
     try {
-      const storage = getStorage();
-      const storageRef = ref(storage, `profile_pictures/${currentUser.uid}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
-      uploadTask.on(
-        "state_changed",
-        (snapshot) => {
-          setUploadProgress(
-            Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
-          );
-        },
-        (err) => {
-          console.error(err);
-          setUploading(false);
-        },
-        async () => {
-          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-          await updateProfile(currentUser, { photoURL: downloadURL });
-          await updateDoc(doc(db, "users", currentUser.uid), { photoURL: downloadURL });
-          setUploading(false);
-          window.location.reload();
+      const userChatsRef = doc(db, "userChats", auth.currentUser.uid);
+      const userChatsSnap = await getDoc(userChatsRef);
+      if (userChatsSnap.exists()) {
+        const chatsData = userChatsSnap.data();
+        const updates = {};
+        Object.entries(chatsData).forEach(([chatId, chatEntry]) => {
+          if (chatEntry?.userInfo?.uid === auth.currentUser.uid) {
+            updates[`${chatId}.userInfo.photoURL`] = newPhotoURL;
+          }
+        });
+        if (Object.keys(updates).length > 0) {
+          await updateDoc(userChatsRef, updates);
         }
-      );
-    } catch (err) {
-      console.error(err);
-      setUploading(false);
+      }
+    } catch (e) {
+      console.warn("Could not update userChats entry:", e);
+    }
+
+    // 4. Update AuthContext state immediately without reload
+    if (updateAuthUser) {
+      updateAuthUser({ photoURL: newPhotoURL });
     }
   };
 
@@ -127,10 +120,13 @@ const Profile = () => {
     }
     setSavingName(true);
     try {
-      await updateProfile(currentUser, { displayName: newDisplayName.trim() });
+      await updateProfile(auth.currentUser, { displayName: newDisplayName.trim() });
       await updateDoc(doc(db, "users", currentUser.uid), {
         displayName: newDisplayName.trim(),
       });
+      if (updateAuthUser) {
+        updateAuthUser({ displayName: newDisplayName.trim() });
+      }
       setIsEditingName(false);
     } catch (err) {
       console.error(err);
@@ -254,49 +250,27 @@ const Profile = () => {
                 </motion.div>
 
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
+                  type="button"
+                  onClick={() => setShowAvatarPicker(true)}
                   className="absolute inset-0 rounded-3xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer"
                   style={{ background: "rgba(0,0,0,0.55)" }}
                   title="Change photo"
+                  aria-label="Change photo"
                 >
                   <Camera size={22} className="text-white" />
                 </button>
-
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleImageChange}
-                  accept="image/*"
-                  className="hidden"
-                />
               </div>
             </div>
-
-            <AnimatePresence>
-              {uploading && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mb-5"
-                >
-                  <div
-                    className="h-1.5 rounded-full overflow-hidden mb-1"
-                    style={{ background: "var(--surface-4)" }}
-                  >
-                    <motion.div
-                      className="h-full rounded-full"
-                      style={{ background: "var(--primary)", width: `${uploadProgress}%` }}
-                      transition={{ duration: 0.2 }}
-                    />
-                  </div>
-                  <p className="text-xs text-center" style={{ color: "var(--text-muted)" }}>
-                    Uploading… {uploadProgress}%
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <div className="flex justify-center -mt-3 mb-6">
+              <button
+                type="button"
+                onClick={() => setShowAvatarPicker(true)}
+                className="text-xs font-semibold text-indigo-500 hover:text-indigo-400 transition-colors"
+                style={{ touchAction: "manipulation" }}
+              >
+                Change photo
+              </button>
+            </div>
 
             <div className="space-y-4">
               <div>
@@ -624,6 +598,45 @@ const Profile = () => {
                     )}
                   </div>
 
+                  {/* PWA App Installation Option */}
+                  <div
+                    className="p-3 rounded-xl space-y-2 transition-colors"
+                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                        <Download size={15} className="text-indigo-400" />
+                        <span>Install ChatHere App</span>
+                      </div>
+                      {isInstalled ? (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-500/20 text-[var(--success-text)]">
+                          Installed
+                        </span>
+                      ) : canInstall && !isInstallIOS ? (
+                        <button
+                          type="button"
+                          onClick={promptInstall}
+                          className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-sm"
+                          style={{ touchAction: "manipulation" }}
+                        >
+                          Install App
+                        </button>
+                      ) : isInstallIOS ? (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">
+                          iOS PWA
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">Web Version</span>
+                      )}
+                    </div>
+
+                    {!isInstalled && isInstallIOS && (
+                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
+                        On iPhone: tap <Share2 size={12} className="inline text-indigo-400 mx-0.5" /> Share &gt; <PlusSquare size={12} className="inline text-indigo-400 mx-0.5" /> Add to Home Screen.
+                      </div>
+                    )}
+                  </div>
+
                   <div
                     className="flex items-center justify-between px-3 py-2.5 rounded-xl"
                     style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
@@ -706,6 +719,14 @@ const Profile = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Avatar Picker Modal */}
+      <AvatarPicker
+        isOpen={showAvatarPicker}
+        onClose={() => setShowAvatarPicker(false)}
+        currentPhotoURL={currentUser?.photoURL}
+        displayName={currentUser?.displayName}
+        onSave={handleSaveAvatar}
+      />
     </div>
   );
 };

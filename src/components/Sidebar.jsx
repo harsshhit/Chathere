@@ -3,6 +3,7 @@ import Navbar from "./Navbar";
 import Search from "./Search";
 import Chats from "./Chats";
 import NotificationBanner from "./NotificationBanner";
+import InstallBanner from "./InstallBanner";
 
 const Sidebar = () => {
   return (
@@ -12,6 +13,7 @@ const Sidebar = () => {
     >
       <div className="flex-shrink-0">
         <Navbar />
+        <InstallBanner />
         <NotificationBanner />
         <Search />
       </div>

@@ -129,7 +129,7 @@ const Input = () => {
   };
 
   const handleSend = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || isLoading) return;
     setIsLoading(true);
     stopTyping();
 
@@ -148,10 +148,13 @@ const Input = () => {
         }),
       });
       setText("");
+      inputRef.current?.focus();
+      requestAnimationFrame(() => inputRef.current?.focus());
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
       setIsLoading(false);
+      inputRef.current?.focus();
     }
   };
 
@@ -176,10 +179,13 @@ const Input = () => {
         }),
       });
       setText("");
+      inputRef.current?.focus();
+      requestAnimationFrame(() => inputRef.current?.focus());
     } catch (err) {
       console.error("Error sending GIF:", err);
     } finally {
       setIsLoading(false);
+      inputRef.current?.focus();
     }
   };
 
@@ -187,12 +193,14 @@ const Input = () => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+      inputRef.current?.focus();
     }
   };
 
   const onEmojiClick = (emojiObject) => {
     setText((prev) => prev + emojiObject.emoji);
     inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
 
     if (data.chatId && !isLoading) {
       updateDoc(doc(db, "chats", data.chatId), {
@@ -240,6 +248,8 @@ const Input = () => {
       <div className="flex items-center gap-2">
         <motion.button
           type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
           whileHover={canHover ? { scale: 1.05 } : undefined}
           whileTap={{ scale: 0.95 }}
           onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
@@ -258,6 +268,8 @@ const Input = () => {
         <div className="relative flex-1 min-w-0">
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => e.preventDefault()}
             onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
             className="absolute left-4 top-1/2 -translate-y-1/2 z-10 transition-colors duration-200"
             style={{ color: showEmojiPicker ? "var(--primary-light)" : "var(--text-muted)" }}
@@ -299,13 +311,15 @@ const Input = () => {
             value={text}
             onChange={handleTyping}
             onKeyDown={handleKeyDown}
-            disabled={isLoading}
             className="chat-input !pl-11 w-full"
             id="chat-message-input"
           />
         </div>
 
         <motion.button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
           whileHover={canHover && text.trim() && !isLoading ? { scale: 1.05 } : undefined}
           whileTap={!text.trim() || isLoading ? {} : { scale: 0.95 }}
           onClick={handleSend}

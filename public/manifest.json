@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "short_name": "ChatHere",
   "name": "ChatHere",
   "icons": [
@@ -21,7 +22,7 @@
       "purpose": "maskable"
     }
   ],
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

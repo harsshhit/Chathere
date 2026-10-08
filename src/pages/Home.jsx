@@ -22,31 +22,6 @@ const Home = () => {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
-  // Visual viewport tracking for mobile keyboards and dynamic address bars
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
-
-    const updateHeight = () => {
-      if (window.visualViewport) {
-        document.documentElement.style.setProperty(
-          "--visual-viewport-height",
-          `${window.visualViewport.height}px`
-        );
-      }
-    };
-
-    window.visualViewport.addEventListener("resize", updateHeight);
-    window.visualViewport.addEventListener("scroll", updateHeight);
-    updateHeight();
-
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", updateHeight);
-        window.visualViewport.removeEventListener("scroll", updateHeight);
-      }
-    };
-  }, []);
-
   // Track navigation direction: +1 = push (list -> chat), -1 = back (chat -> list)
   const prevPathRef = useRef(location.pathname);
   const directionRef = useRef(1);
@@ -90,10 +65,10 @@ const Home = () => {
 
   return (
     <div
-      className="fixed inset-0 overflow-hidden"
+      className="w-full h-full overflow-hidden flex flex-col relative"
       style={{
         background: "var(--surface)",
-        height: "var(--visual-viewport-height, 100dvh)",
+        height: "var(--app-height, 100dvh)",
       }}
     >
       {isMobile ? (

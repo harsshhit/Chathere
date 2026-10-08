@@ -3,6 +3,8 @@ import { useContext, lazy, Suspense, useEffect } from "react";
 import { AuthContext } from "./context/AuthContext";
 import { UIProvider } from "./context/UIContext";
 import { ChatContextProvider } from "./context/ChatContext";
+import { InstallProvider } from "./context/InstallContext";
+import useVisualViewport from "./utils/useVisualViewport";
 import { Loader2 } from "lucide-react";
 import "./index.css";
 
@@ -68,13 +70,16 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const App = () => {
+  useVisualViewport();
+
   return (
     <UIProvider>
-      <BrowserRouter
-        basename="/"
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-      >
-        <ChatContextProvider>
+      <InstallProvider>
+        <BrowserRouter
+          basename="/"
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <ChatContextProvider>
           <ChunkPreloader />
           <ServiceWorkerMessageListener />
           <Suspense fallback={<LoadingFallback />}>
@@ -111,7 +116,8 @@ const App = () => {
         </Suspense>
         </ChatContextProvider>
       </BrowserRouter>
-    </UIProvider>
+    </InstallProvider>
+  </UIProvider>
   );
 };
 

@@ -42,8 +42,23 @@ export const AuthContextProvider = ({ children }) => {
     );
   }
 
+  const updateAuthUser = (updates = {}) => {
+    if (!auth.currentUser) return;
+    // Clone auth.currentUser preserving prototype methods while triggering React state updates
+    try {
+      const cloned = Object.assign(
+        Object.create(Object.getPrototypeOf(auth.currentUser)),
+        auth.currentUser,
+        updates
+      );
+      setCurrentUser(cloned);
+    } catch {
+      setCurrentUser({ ...auth.currentUser, ...updates });
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ currentUser, error }}>
+    <AuthContext.Provider value={{ currentUser, error, updateAuthUser, setCurrentUser }}>
       {children}
     </AuthContext.Provider>
   );

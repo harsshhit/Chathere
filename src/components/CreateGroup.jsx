@@ -72,7 +72,7 @@ const CreateGroup = ({ onClose }) => {
       const groupData = {
         uid: groupId,
         displayName: groupName,
-        photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(groupName)}&background=random`,
+        photoURL: `https://api.dicebear.com/9.x/identicon/svg?seed=${encodeURIComponent(groupName)}`,
         isGroup: true,
         members: groupMembers,
         admin: currentUser.uid,

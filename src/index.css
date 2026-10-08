@@ -122,8 +122,10 @@
   }
 
   html, body, #root {
+    height: 100%;
     height: 100vh;
     height: 100dvh;
+    height: var(--app-height, 100dvh);
     overscroll-behavior-y: none;
     margin: 0;
     padding: 0;
@@ -131,10 +133,20 @@
     color: var(--text-primary);
   }
 
-  /* Prevent layout jumps from mobile browser bar: app shell uses 100dvh */
+  /* Prevent layout jumps from mobile browser bar: app shell uses --app-height */
   .app-shell {
+    height: 100vh;
     height: 100dvh;
+    height: var(--app-height, 100dvh);
     overflow: hidden;
+  }
+
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   body {
@@ -399,7 +411,7 @@
   .viewport-height {
     height: 100vh;
     height: 100dvh;
-    height: var(--visual-viewport-height, 100dvh);
+    height: var(--app-height, 100dvh);
   }
 
   .text-gradient {

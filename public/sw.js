@@ -32,3 +32,8 @@ self.addEventListener("notificationclick", (event) => {
       })
   );
 });
+
+// Pass-through fetch handler for PWA installability requirements (no caching)
+self.addEventListener("fetch", (event) => {
+  // Let the browser handle requests normally
+});

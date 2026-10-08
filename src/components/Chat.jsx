@@ -132,13 +132,16 @@ const Chat = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2 }}
-      className="h-full flex flex-col viewport-height"
-      style={{ background: "var(--surface)" }}
+      className="h-full flex flex-col flex-1 min-h-0 w-full overflow-hidden"
+      style={{
+        background: "var(--surface)",
+        height: "var(--app-height, 100dvh)",
+      }}
     >
       {hasChatTarget && data.user ? (
         <>
           <div
-            className="flex items-center justify-between px-4 py-3 flex-shrink-0 safe-top"
+            className="flex items-center justify-between px-4 py-3 shrink-0 safe-top"
             style={{
               background: "var(--surface-2)",
               borderBottom: "1px solid var(--border)",
@@ -161,7 +164,8 @@ const Chat = () => {
               >
                 <Avatar
                   src={data.user?.photoURL}
-                  alt={data.user?.displayName}
+                  name={data.user?.displayName}
+                  size={40}
                   className="w-10 h-10 rounded-2xl object-cover transition-transform duration-200"
                   style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
                 />
@@ -177,13 +181,19 @@ const Chat = () => {
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden overscroll-contain">
+          <div
+            className="flex-1 min-h-0 overflow-hidden flex flex-col"
+            style={{ overscrollBehavior: "contain" }}
+          >
             <Messages key={data.chatId || "chat"} />
           </div>
 
           <div
-            className="flex-shrink-0 safe-bottom"
-            style={{ borderTop: "1px solid var(--border)" }}
+            className="shrink-0 safe-bottom"
+            style={{
+              borderTop: "1px solid var(--border)",
+              paddingBottom: "env(safe-area-inset-bottom)",
+            }}
           >
             <Input />
           </div>

@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile, signInWithPopup } from "firebase/auth";
-import { auth, db, storage, googleProvider } from "../firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { auth, db, googleProvider } from "../firebase";
 import { doc, setDoc, getDoc } from "firebase/firestore";
-import { User, Mail, Lock, ImagePlus, Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
+import { User, Mail, Lock, Eye, EyeOff, Sparkles, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import Avatar from "../components/Avatar";
 
 const Register = () => {
   const [err, setErr] = useState(false);
@@ -16,22 +16,7 @@ const Register = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [avatar, setAvatar] = useState(null);
-  const [avatarPreview, setAvatarPreview] = useState(null);
   const navigate = useNavigate();
-
-  const handleAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setErr(true);
-        setErrMsg("Avatar image must be under 5MB.");
-        return;
-      }
-      setAvatar(file);
-      setAvatarPreview(URL.createObjectURL(file));
-    }
-  };
 
   const validateForm = () => {
     if (!displayName.trim()) {
@@ -61,32 +46,15 @@ const Register = () => {
       setErr(false);
       const res = await createUserWithEmailAndPassword(auth, email, password);
       
-      let downloadURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`;
+      // Auto-assign a unique DiceBear avatar without file uploads
+      const generatedPhotoURL = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(res.user.uid || displayName.trim())}`;
 
-      if (avatar) {
-        const date = new Date().getTime();
-        const fileName = `${displayName}-${date}`;
-        const storageRef = ref(storage, fileName);
-        const uploadTask = uploadBytesResumable(storageRef, avatar);
-
-        await new Promise((resolve, reject) => {
-          uploadTask.on("state_changed", null, reject, () => {
-            getDownloadURL(storageRef)
-              .then((url) => {
-                downloadURL = url;
-                resolve();
-              })
-              .catch(reject);
-          });
-        });
-      }
-
-      await updateProfile(res.user, { displayName, photoURL: downloadURL });
+      await updateProfile(res.user, { displayName: displayName.trim(), photoURL: generatedPhotoURL });
       await setDoc(doc(db, "users", res.user.uid), {
         uid: res.user.uid,
-        displayName,
+        displayName: displayName.trim(),
         email,
-        photoURL: downloadURL,
+        photoURL: generatedPhotoURL,
       });
       await setDoc(doc(db, "userChats", res.user.uid), {});
 
@@ -116,12 +84,16 @@ const Register = () => {
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userChatsDoc = await getDoc(doc(db, "userChats", user.uid));
 
+      const photoURL =
+        user.photoURL ||
+        `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(user.uid || user.displayName || "User")}`;
+
       if (!userDoc.exists()) {
         await setDoc(doc(db, "users", user.uid), {
           uid: user.uid,
           displayName: user.displayName,
           email: user.email,
-          photoURL: user.photoURL,
+          photoURL,
         });
       }
       if (!userChatsDoc.exists()) {
@@ -180,42 +152,25 @@ const Register = () => {
             </p>
           </motion.div>
 
-          <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={1} className="flex justify-center mb-6">
-            <label htmlFor="register-avatar" className="cursor-pointer group">
-              <div className="relative">
-                {avatarPreview ? (
-                  <>
-                    <img
-                      src={avatarPreview}
-                      alt="Avatar preview"
-                      className="w-20 h-20 rounded-2xl object-cover"
-                      style={{ border: "2px solid rgba(99,102,241,0.6)", boxShadow: "0 8px 24px rgba(99,102,241,0.3)" }}
-                    />
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                      <CheckCircle2 size={14} className="text-white" />
-                    </div>
-                  </>
-                ) : (
-                  <div
-                    className="w-20 h-20 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all duration-200"
-                    style={{
-                      background: "var(--surface-3)",
-                      border: "2px dashed rgba(99,102,241,0.4)",
-                    }}
-                  >
-                    <ImagePlus size={20} style={{ color: "var(--text-muted)" }} />
-                    <span className="text-[10px] text-center leading-tight" style={{ color: "var(--text-muted)" }}>Photo<br/>(Optional)</span>
-                  </div>
-                )}
-              </div>
-              <input
-                type="file"
-                id="register-avatar"
-                accept="image/*"
-                onChange={handleAvatarChange}
-                className="hidden"
+          <motion.div variants={fadeUp} initial="hidden" animate="visible" custom={1} className="flex flex-col items-center justify-center mb-6">
+            <div className="relative">
+              <Avatar
+                src={`https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(displayName.trim() || "ChatHere")}`}
+                name={displayName || "ChatHere"}
+                size={76}
+                className="w-[76px] h-[76px] rounded-2xl object-cover"
+                style={{
+                  border: "2px solid rgba(99,102,241,0.6)",
+                  boxShadow: "0 8px 24px rgba(99,102,241,0.25)",
+                }}
               />
-            </label>
+              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center shadow-sm">
+                <Sparkles size={12} className="text-white" />
+              </div>
+            </div>
+            <p className="text-[11px] mt-2 text-center" style={{ color: "var(--text-muted)" }}>
+              Auto-generated avatar (change anytime in Profile)
+            </p>
           </motion.div>
 
           <form onSubmit={handleSubmit} className="space-y-3.5">
