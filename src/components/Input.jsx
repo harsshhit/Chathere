@@ -180,6 +180,35 @@ const Input = () => {
         }
 
         await ensureChatDocAndUserChats(msgText);
+
+        const recipientUids = data.user?.isGroup
+          ? (data.user.members || [])
+              .map((member) => member.uid)
+              .filter((uid) => uid && uid !== currentUser.uid)
+          : data.user?.uid
+          ? [data.user.uid]
+          : [];
+
+        void (async () => {
+          try {
+            const idToken = await currentUser.getIdToken();
+            fetch("/api/notify", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer " + idToken,
+              },
+              body: JSON.stringify({
+                chatId: data.chatId,
+                recipientUids,
+                title: currentUser.displayName,
+                body: msgText || "📷 Photo",
+              }),
+            }).catch(() => undefined);
+          } catch (error) {
+            return undefined;
+          }
+        })();
       } catch (error) {
         console.error("Error sending message:", error);
         pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");

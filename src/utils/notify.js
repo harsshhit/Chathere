@@ -4,6 +4,8 @@
  * with robust fallbacks, audio unlocks, sound preferences, and vibration.
  */
 
+import { registerPushToken } from "./pushToken";
+
 const SETTINGS_KEY = "chathere_notification_settings";
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
@@ -150,7 +152,7 @@ export const isStandalone = () => {
  * Must ONLY be called from a user gesture (click/tap handler).
  * Requests notification permission and registers service worker on success.
  */
-export const requestNotificationPermission = async () => {
+export const requestNotificationPermission = async (currentUser) => {
   if (!isNotificationSupported()) {
     console.warn("Notifications not supported in this environment");
     return false;
@@ -159,6 +161,7 @@ export const requestNotificationPermission = async () => {
   try {
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
+      await registerPushToken(currentUser);
       if ("serviceWorker" in navigator) {
         try {
           await navigator.serviceWorker.register("/sw.js", { scope: "/" });

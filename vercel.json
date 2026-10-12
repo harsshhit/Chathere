@@ -33,7 +33,7 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!sw\\.js|manifest\\.json|favicon\\.ico|icon-.*\\.png|robots\\.txt|asset-manifest\\.json|static/.*).*)",
+      "source": "/((?!api/.*|sw\\.js|manifest\\.json|favicon\\.ico|icon-.*\\.png|robots\\.txt|asset-manifest\\.json|static/.*).*)",
       "destination": "/index.html"
     }
   ]

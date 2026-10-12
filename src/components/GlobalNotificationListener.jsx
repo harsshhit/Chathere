@@ -5,6 +5,7 @@ import { ChatContext } from "../context/ChatContext";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { notifyMessage, updateTitleUnread } from "../utils/notify";
+import { registerPushToken } from "../utils/pushToken";
 
 /**
  * Top-level persistent notification and unread counter listener.
@@ -28,6 +29,13 @@ const GlobalNotificationListener = () => {
   const notifiedIdsRef = useRef(new Set());
   const isFirstSnapshotRef = useRef(true);
   const sessionStartTimeRef = useRef(Date.now());
+  const currentUserId = currentUser?.uid;
+
+  useEffect(() => {
+    if (currentUserId && typeof Notification !== "undefined" && Notification.permission === "granted") {
+      registerPushToken({ uid: currentUserId });
+    }
+  }, [currentUserId]);
 
   // Listen to window focus and visibility to reset tab title
   useEffect(() => {

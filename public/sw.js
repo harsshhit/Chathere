@@ -51,10 +51,11 @@ self.addEventListener("push", (event) => {
     }
   }
 
-  const title = data.title || data.notification?.title || "ChatHere";
-  const body = data.body || data.notification?.body || "You have a new message";
-  const icon = data.icon || data.notification?.icon || "/icon-192.png";
-  const chatId = data.chatId || data.data?.chatId || "";
+  const payloadData = data.data || {};
+  const title = payloadData.title || data.title || data.notification?.title || "ChatHere";
+  const body = payloadData.body || data.body || data.notification?.body || "You have a new message";
+  const icon = payloadData.icon || data.icon || data.notification?.icon || "/icon-192.png";
+  const chatId = payloadData.chatId || data.chatId || "";
 
   const options = {
     body,
@@ -66,7 +67,17 @@ self.addEventListener("push", (event) => {
     data: { chatId },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clientList) => {
+        const hasFocusedVisibleClient = clientList.some(
+          (client) => client.visibilityState === "visible" && client.focused
+        );
+        if (hasFocusedVisibleClient) return;
+        return self.registration.showNotification(title, options);
+      })
+  );
 });
 
 // Pass-through fetch handler for PWA installability requirements (no caching)

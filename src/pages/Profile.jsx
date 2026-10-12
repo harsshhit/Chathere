@@ -48,7 +48,7 @@ import {
 } from "../utils/notify";
 import { useTheme } from "../context/ThemeContext";
 
-const Profile = () => {
+const Profile = ({ settings = false }) => {
   const { currentUser, updateAuthUser } = useContext(AuthContext);
   const { theme, setTheme } = useTheme();
   const { canInstall, isInstalled, promptInstall, isIOS: isInstallIOS } = useInstall();
@@ -170,7 +170,7 @@ const Profile = () => {
     if (permissionState === "granted" || permissionState === "denied" || permissionState === "unsupported") {
       return;
     }
-    await requestNotificationPermission();
+    await requestNotificationPermission(currentUser);
     setPermissionState(getPermissionState());
   };
 
@@ -236,7 +236,7 @@ const Profile = () => {
           >
             <ArrowLeft size={20} />
           </button>
-          <span className="brand-logo text-xl">ChatHere</span>
+          <span className="brand-logo text-xl">{settings ? "Settings" : "ChatHere"}</span>
         </div>
       </div>
 
@@ -248,6 +248,7 @@ const Profile = () => {
           className="w-full max-w-md"
         >
           <div className="glass-card p-6 sm:p-8">
+            {!settings && <>
             <div className="flex justify-center mb-6">
               <div className="relative group">
                 <motion.div
@@ -288,9 +289,10 @@ const Profile = () => {
                 Change photo
               </button>
             </div>
+            </>}
 
             <div className="space-y-4">
-              <div>
+              {!settings && <div>
                 <label
                   className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
@@ -359,9 +361,9 @@ const Profile = () => {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+              </div>}
 
-              <div>
+              {!settings && <div>
                 <label
                   className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
@@ -379,9 +381,9 @@ const Profile = () => {
                     {currentUser.email}
                   </span>
                 </div>
-              </div>
+              </div>}
 
-              <div>
+              {!settings && <div>
                 <label
                   className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
                 >
@@ -458,8 +460,9 @@ const Profile = () => {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+              </div>}
 
+            {settings && <>
               <div>
                 <label className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]">
                   Preferences & Appearance
@@ -821,7 +824,9 @@ const Profile = () => {
                   </div>
                 </div>
               </div>
+            </>}
 
+            {!settings && <>
               <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}>
                 <Calendar size={14} style={{ color: "var(--text-muted)" }} className="flex-shrink-0" />
                 <span className="text-sm text-[var(--text-secondary)]">
@@ -843,6 +848,7 @@ const Profile = () => {
                   Sign out
                 </button>
               </div>
+            </>}
             </div>
           </div>
         </motion.div>

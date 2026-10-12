@@ -3,7 +3,7 @@ import { AuthContext } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import Avatar from "./Avatar";
-import { Users, Sun, Moon } from "lucide-react";
+import { Users, Sun, Moon, UserRound, Settings } from "lucide-react";
 import CreateGroup from "./CreateGroup";
 import { useTheme } from "../context/ThemeContext";
 
@@ -11,6 +11,7 @@ const Navbar = () => {
   const { currentUser } = useContext(AuthContext);
   const navigate = useNavigate();
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
 
@@ -64,33 +65,81 @@ const Navbar = () => {
             <Users size={18} />
           </button>
 
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            onPointerDown={() => {
-              import("../pages/Profile").catch(() => {});
-            }}
-            onClick={() => navigate("/profile")}
-            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200"
-            style={{ background: "var(--subtle)", touchAction: "manipulation" }}
-            title="View profile"
-          >
-            <span
-              className="text-sm font-medium max-w-[100px] truncate hidden sm:block"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {currentUser?.displayName}
-            </span>
-            <Avatar
-              src={currentUser?.photoURL}
-              alt={currentUser?.displayName}
-              className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-              style={{
-                border: "2px solid rgba(99,102,241,0.5)",
-                boxShadow: "0 2px 12px rgba(99,102,241,0.25)",
+          <div className="relative">
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              onPointerDown={() => {
+                import("../pages/Profile").catch(() => {});
               }}
-            />
-          </motion.button>
+              onClick={() => setShowAccountMenu((open) => !open)}
+              className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200"
+              style={{ background: "var(--subtle)", touchAction: "manipulation" }}
+              title="Account menu"
+              aria-label="Open account menu"
+              aria-haspopup="menu"
+              aria-expanded={showAccountMenu}
+            >
+              <span
+                className="text-sm font-medium max-w-[100px] truncate hidden sm:block"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {currentUser?.displayName}
+              </span>
+              <Avatar
+                src={currentUser?.photoURL}
+                alt={currentUser?.displayName}
+                className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                style={{
+                  border: "2px solid rgba(99,102,241,0.5)",
+                  boxShadow: "0 2px 12px rgba(99,102,241,0.25)",
+                }}
+              />
+            </motion.button>
+
+            <AnimatePresence>
+              {showAccountMenu && (
+                <motion.div
+                  role="menu"
+                  aria-label="Account options"
+                  initial={{ opacity: 0, y: -5, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -5, scale: 0.98 }}
+                  transition={{ duration: 0.14 }}
+                  className="absolute right-0 top-full mt-2 z-40 w-48 p-1.5 rounded-xl shadow-xl"
+                  style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      navigate("/profile");
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left hover:bg-[var(--hover)]"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    <UserRound size={16} />
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      navigate("/settings");
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left hover:bg-[var(--hover)]"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    <Settings size={16} />
+                    Settings
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 

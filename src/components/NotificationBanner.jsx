@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { Bell, X, Share2, PlusSquare } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AuthContext } from "../context/AuthContext";
 import {
   getPermissionState,
   requestNotificationPermission,
@@ -9,6 +10,7 @@ import {
 } from "../utils/notify";
 
 const NotificationBanner = () => {
+  const { currentUser } = useContext(AuthContext);
   const [dismissed, setDismissed] = useState(true);
   const [permissionState, setPermissionState] = useState("granted");
   const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
@@ -44,7 +46,7 @@ const NotificationBanner = () => {
   const handleEnable = async () => {
     setIsRequesting(true);
     try {
-      const granted = await requestNotificationPermission();
+      const granted = await requestNotificationPermission(currentUser);
       if (granted) {
         setPermissionState("granted");
         setDismissed(true);
