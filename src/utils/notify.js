@@ -1,8 +1,46 @@
 /**
  * Native Notification & Web Audio Helper for ChatHere
  * Handles Service Worker notifications (Chrome Android, iOS 16.4+ standalone, desktop)
- * with robust fallbacks and audio unlocks.
+ * with robust fallbacks, audio unlocks, sound preferences, and vibration.
  */
+
+const SETTINGS_KEY = "chathere_notification_settings";
+
+export const DEFAULT_NOTIFICATION_SETTINGS = {
+  sound: true,
+  vibrate: true,
+  showPreview: true,
+  tone: "chime", // "chime" | "ping" | "pop" | "bell"
+};
+
+/**
+ * Retrieves user notification preferences from localStorage.
+ */
+export const getNotificationSettings = () => {
+  if (typeof window === "undefined") return DEFAULT_NOTIFICATION_SETTINGS;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_NOTIFICATION_SETTINGS;
+    return { ...DEFAULT_NOTIFICATION_SETTINGS, ...JSON.parse(raw) };
+  } catch (e) {
+    return DEFAULT_NOTIFICATION_SETTINGS;
+  }
+};
+
+/**
+ * Persists user notification preferences.
+ */
+export const saveNotificationSettings = (settings) => {
+  if (typeof window === "undefined") return;
+  try {
+    const current = getNotificationSettings();
+    const updated = { ...current, ...settings };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (e) {
+    console.warn("Failed to save notification settings:", e);
+  }
+};
 
 let audioCtx = null;
 let audioUnlocked = false;
@@ -67,13 +105,12 @@ export const initAudioUnlock = () => {
 };
 
 /**
- * Checks if Notification API and Service Worker are supported in current browser.
+ * Checks if Notification API is supported in current browser.
  */
 export const isNotificationSupported = () => {
   return (
     typeof window !== "undefined" &&
-    "Notification" in window &&
-    "serviceWorker" in navigator
+    "Notification" in window
   );
 };
 
@@ -139,11 +176,15 @@ export const requestNotificationPermission = async () => {
 };
 
 /**
- * Synthesizes and plays message sound chime using Web Audio API.
+ * Synthesizes and plays a chosen message sound chime using Web Audio API.
  * Never throws, catches any promise rejection, and never blocks notifications.
  */
-export const playMessageSound = () => {
+export const playMessageSound = (customTone) => {
   try {
+    const settings = getNotificationSettings();
+    if (!settings.sound && !customTone) return;
+
+    const tone = customTone || settings.tone || "chime";
     const ctx = getAudioContext();
     if (!ctx) return;
 
@@ -153,57 +194,132 @@ export const playMessageSound = () => {
       });
     }
 
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.25);
+
+    if (tone === "ping") {
+      // High crisp ping (C6 -> E6)
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1046.5, now);
+      osc.frequency.exponentialRampToValueAtTime(1318.5, now + 0.12);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    } else if (tone === "pop") {
+      // Soft gentle bubble pop
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(520, now);
+      osc.frequency.exponentialRampToValueAtTime(260, now + 0.1);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } else if (tone === "bell") {
+      // Warm resonant bell
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(784, now);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } else {
+      // Default: Melodic chime (D5 -> A5)
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    }
   } catch (err) {
     console.warn("Sound playback error:", err);
   }
 };
 
 /**
+ * Preview sound tone specifically for user selection in settings.
+ */
+export const playTonePreview = (toneName) => {
+  playMessageSound(toneName);
+};
+
+/**
  * Displays an OS-level notification via ServiceWorkerRegistration.showNotification().
- * Falls back to new Notification() in try/catch only if no service worker is available.
+ * Falls back to new Notification() reliably if service worker is unavailable or times out.
  * Never throws; logs warnings on failures.
  */
 export const notifyMessage = async ({ chatId, title, body, icon }) => {
   try {
-    // Play sound non-blockingly
-    try {
-      playMessageSound();
-    } catch (soundErr) {
-      console.warn("Sound error in notifyMessage:", soundErr);
+    const settings = getNotificationSettings();
+
+    // 1. Play sound chime if sound setting enabled
+    if (settings.sound) {
+      try {
+        playMessageSound(settings.tone);
+      } catch (soundErr) {
+        console.warn("Sound error in notifyMessage:", soundErr);
+      }
     }
 
+    // 2. Trigger haptic vibration if enabled and supported on mobile
+    if (settings.vibrate && typeof navigator !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([150, 60, 150]);
+      } catch (vibErr) {
+        // Safe ignore
+      }
+    }
+
+    // Check notification permission
     if (!("Notification" in window) || Notification.permission !== "granted") {
-      console.warn("notifyMessage: Notification permission is not granted");
       return;
     }
 
+    // Resolve message content according to privacy preview setting
+    const resolvedBody = settings.showPreview ? (body || "") : "New message received";
     const resolvedIcon = icon || "/icon-192.png";
+
     const notificationOptions = {
-      body: body || "",
+      body: resolvedBody,
       icon: resolvedIcon,
       badge: "/icon-192.png",
       tag: "chat-" + chatId,
       renotify: true,
-      vibrate: [100, 50, 100],
+      vibrate: settings.vibrate ? [150, 60, 150] : undefined,
       data: { chatId },
     };
 
+    // 3. Try OS-level Service Worker showNotification with a safe timeout
+    let swShown = false;
     if ("serviceWorker" in navigator) {
       try {
-        const registration = await navigator.serviceWorker.ready;
+        // Check for existing active registration first (fastest)
+        let registration = await navigator.serviceWorker.getRegistration();
+
+        // If not immediately available, race navigator.serviceWorker.ready with a 1000ms timeout
+        if (!registration) {
+          registration = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("Service worker ready timeout")), 1000)
+            ),
+          ]).catch(() => null);
+        }
+
         if (registration && registration.showNotification) {
           await registration.showNotification(title || "ChatHere", notificationOptions);
+          swShown = true;
           return;
         }
       } catch (swErr) {
@@ -211,22 +327,24 @@ export const notifyMessage = async ({ chatId, title, body, icon }) => {
       }
     }
 
-    // Fall back to new Notification() only if service worker was unavailable
-    try {
-      const fallbackNotification = new Notification(title || "ChatHere", {
-        body: notificationOptions.body,
-        icon: notificationOptions.icon,
-        badge: notificationOptions.badge,
-        tag: notificationOptions.tag,
-        renotify: notificationOptions.renotify,
-        data: notificationOptions.data,
-      });
-      fallbackNotification.onclick = () => {
-        window.focus();
-        fallbackNotification.close();
-      };
-    } catch (nErr) {
-      console.warn("new Notification fallback failed:", nErr);
+    // 4. Fall back to window Notification constructor only if service worker was unavailable
+    if (!swShown) {
+      try {
+        const fallbackNotification = new Notification(title || "ChatHere", {
+          body: notificationOptions.body,
+          icon: notificationOptions.icon,
+          badge: notificationOptions.badge,
+          tag: notificationOptions.tag,
+          renotify: notificationOptions.renotify,
+          data: notificationOptions.data,
+        });
+        fallbackNotification.onclick = () => {
+          window.focus();
+          fallbackNotification.close();
+        };
+      } catch (nErr) {
+        console.warn("new Notification fallback failed:", nErr);
+      }
     }
   } catch (err) {
     console.warn("Unexpected error in notifyMessage:", err);

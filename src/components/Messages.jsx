@@ -1,11 +1,12 @@
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import React, { useContext, useEffect, useLayoutEffect, useState, useRef, useCallback } from "react";
+import React, { useContext, useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
 import { ChatContext } from "../context/ChatContext";
 import { AuthContext } from "../context/AuthContext";
 import { db } from "../firebase";
 import Message from "./Message";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
+import { usePendingMessages, pendingMessagesStore } from "../utils/pendingMessages";
 
 const Messages = () => {
   const [messages, setMessages] = useState([]);
@@ -13,6 +14,19 @@ const Messages = () => {
   const [lastRead, setLastRead] = useState({});
   const { data } = useContext(ChatContext);
   const { currentUser } = useContext(AuthContext);
+
+  const pendingMessages = usePendingMessages(data.chatId);
+
+  // Merge server messages with optimistic pending messages (filter out any already arrived on server)
+  const serverMsgIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
+  const activePending = useMemo(
+    () => pendingMessages.filter((pm) => !serverMsgIds.has(pm.id)),
+    [pendingMessages, serverMsgIds]
+  );
+  const displayMessages = useMemo(
+    () => [...messages, ...activePending],
+    [messages, activePending]
+  );
 
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
@@ -83,6 +97,15 @@ const Messages = () => {
         setTyping(docData.typing || {});
         setLastRead(currentLastRead);
         previousMessagesLength.current = newMessages.length;
+
+        // Clean up any pending messages that are now confirmed in Firestore
+        if (data.chatId && newMessages.length > 0) {
+          newMessages.forEach((m) => {
+            if (m?.id) {
+              pendingMessagesStore.removeMessage(data.chatId, m.id);
+            }
+          });
+        }
 
         markAsReadIfFocused(newMessages, currentLastRead);
       }
@@ -205,17 +228,17 @@ const Messages = () => {
   // Synchronous pre-paint jump to bottom when messages first load in DOM
   useLayoutEffect(() => {
     if (!containerRef.current) return;
-    if (!initialScrollComplete.current && messages.length > 0) {
+    if (!initialScrollComplete.current && displayMessages.length > 0) {
       scrollToBottomInstant();
     }
-  }, [messages, scrollToBottomInstant]);
+  }, [displayMessages, scrollToBottomInstant]);
 
   // Ensure bottom focus on chat opening, settle initial load, and handle incoming messages
   useEffect(() => {
     if (!containerRef.current) return;
 
     if (!initialScrollComplete.current) {
-      if (messages.length > 0) {
+      if (displayMessages.length > 0) {
         scrollToBottomInstant();
         const rafId = requestAnimationFrame(() => {
           scrollToBottomInstant();
@@ -233,7 +256,7 @@ const Messages = () => {
       }
     } else {
       // Subsequent messages after initial load:
-      const latestMessage = messages[messages.length - 1];
+      const latestMessage = displayMessages[displayMessages.length - 1];
       const isSentByMe = latestMessage && latestMessage.senderId === currentUser.uid;
 
       if (isSentByMe || isNearBottom()) {
@@ -242,7 +265,7 @@ const Messages = () => {
         }
       }
     }
-  }, [messages, typing, currentUser?.uid, isNearBottom, scrollToBottomInstant]);
+  }, [displayMessages, typing, currentUser?.uid, isNearBottom, scrollToBottomInstant]);
 
   // Keep bottom focus pinned as media/images or dynamic content render
   useEffect(() => {
@@ -327,14 +350,14 @@ const Messages = () => {
         style={{ background: "var(--surface)", overscrollBehavior: "contain" }}
       >
         <div ref={contentRef} className="space-y-1 min-h-full flex flex-col">
-          {messages.length === 0 ? (
+          {displayMessages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 No messages yet — say hello! 👋
               </p>
             </div>
           ) : (
-            messages.map((m, index) => (
+            displayMessages.map((m, index) => (
               <Message key={m.id || index} message={m} lastRead={lastRead} />
             ))
           )}

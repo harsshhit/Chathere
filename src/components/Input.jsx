@@ -1,5 +1,5 @@
 import React, { useContext, useState, useRef, useEffect } from "react";
-import { Send, Loader2, Smile } from "lucide-react";
+import { Send, Smile } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import {
@@ -18,10 +18,10 @@ import EmojiPicker from "emoji-picker-react";
 import { motion, AnimatePresence } from "framer-motion";
 import GifPicker from "./GifPicker";
 import { useTheme } from "../context/ThemeContext";
+import { pendingMessagesStore } from "../utils/pendingMessages";
 
 const Input = () => {
   const [text, setText] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
 
@@ -128,65 +128,122 @@ const Input = () => {
     }
   };
 
-  const handleSend = async () => {
-    if (!text.trim() || isLoading) return;
-    setIsLoading(true);
-    stopTyping();
-
+  const handleSend = () => {
     const msgText = text.trim();
+    if (!msgText || !data.chatId) return;
 
-    try {
-      await ensureChatDocAndUserChats(msgText);
-      await updateDoc(doc(db, "chats", data.chatId), {
-        messages: arrayUnion({
-          id: uuid(),
+    // Immediately clear input and reset typing
+    setText("");
+    stopTyping();
+    inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
+
+    const msgId = uuid();
+    const optimisticDate = new Date();
+
+    // Optimistic pending message with clock icon
+    const optimisticMsg = {
+      id: msgId,
+      text: msgText,
+      senderId: currentUser.uid,
+      senderName: currentUser.displayName,
+      senderPhoto: currentUser.photoURL,
+      date: optimisticDate,
+      status: "sending",
+    };
+
+    pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
+
+    // Send in background without freezing input bar
+    (async () => {
+      try {
+        const chatRef = doc(db, "chats", data.chatId);
+        const payload = {
+          id: msgId,
           text: msgText,
           senderId: currentUser.uid,
           senderName: currentUser.displayName,
           senderPhoto: currentUser.photoURL,
-          date: Timestamp.now(),
-        }),
-      });
-      setText("");
-      inputRef.current?.focus();
-      requestAnimationFrame(() => inputRef.current?.focus());
-    } catch (error) {
-      console.error("Error sending message:", error);
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
-    }
+          date: Timestamp.fromDate(optimisticDate),
+        };
+
+        try {
+          await updateDoc(chatRef, {
+            messages: arrayUnion(payload),
+          });
+        } catch (updateErr) {
+          await setDoc(chatRef, {
+            messages: [payload],
+            typing: {},
+            lastRead: {},
+          }, { merge: true });
+        }
+
+        await ensureChatDocAndUserChats(msgText);
+      } catch (error) {
+        console.error("Error sending message:", error);
+        pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
+      }
+    })();
   };
 
-  const handleGifSend = async (gifUrl) => {
+  const handleGifSend = (gifUrl) => {
     setShowGifPicker(false);
-    setIsLoading(true);
+    const msgText = text.trim();
+    setText("");
     stopTyping();
+    inputRef.current?.focus();
+    requestAnimationFrame(() => inputRef.current?.focus());
 
-    const msgText = text.trim() || "Sent a GIF";
+    if (!data.chatId) return;
 
-    try {
-      await ensureChatDocAndUserChats(msgText);
-      await updateDoc(doc(db, "chats", data.chatId), {
-        messages: arrayUnion({
-          id: uuid(),
-          text: text.trim(),
+    const msgId = uuid();
+    const optimisticDate = new Date();
+
+    const optimisticMsg = {
+      id: msgId,
+      text: msgText,
+      img: gifUrl,
+      senderId: currentUser.uid,
+      senderName: currentUser.displayName,
+      senderPhoto: currentUser.photoURL,
+      date: optimisticDate,
+      status: "sending",
+    };
+
+    pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
+
+    (async () => {
+      try {
+        const chatRef = doc(db, "chats", data.chatId);
+        const payload = {
+          id: msgId,
+          text: msgText,
           senderId: currentUser.uid,
           senderName: currentUser.displayName,
           senderPhoto: currentUser.photoURL,
-          date: Timestamp.now(),
+          date: Timestamp.fromDate(optimisticDate),
           img: gifUrl,
-        }),
-      });
-      setText("");
-      inputRef.current?.focus();
-      requestAnimationFrame(() => inputRef.current?.focus());
-    } catch (err) {
-      console.error("Error sending GIF:", err);
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
-    }
+        };
+
+        try {
+          await updateDoc(chatRef, {
+            messages: arrayUnion(payload),
+          });
+        } catch (updateErr) {
+          await setDoc(chatRef, {
+            messages: [payload],
+            typing: {},
+            lastRead: {},
+          }, { merge: true });
+        }
+
+        await ensureChatDocAndUserChats(msgText || "Sent a GIF");
+      } catch (err) {
+        console.error("Error sending GIF:", err);
+        pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
+      }
+    })();
   };
 
   const handleKeyDown = (e) => {
@@ -202,7 +259,7 @@ const Input = () => {
     inputRef.current?.focus();
     requestAnimationFrame(() => inputRef.current?.focus());
 
-    if (data.chatId && !isLoading) {
+    if (data.chatId) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: true
       }).catch(() => { });
@@ -217,7 +274,7 @@ const Input = () => {
   const handleTyping = (e) => {
     setText(e.target.value);
 
-    if (data.chatId && !isLoading) {
+    if (data.chatId) {
       updateDoc(doc(db, "chats", data.chatId), {
         [`typing.${currentUser.uid}`]: true
       }).catch(() => { });
@@ -320,20 +377,16 @@ const Input = () => {
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => e.preventDefault()}
-          whileHover={canHover && text.trim() && !isLoading ? { scale: 1.05 } : undefined}
-          whileTap={!text.trim() || isLoading ? {} : { scale: 0.95 }}
+          whileHover={canHover && text.trim() ? { scale: 1.05 } : undefined}
+          whileTap={!text.trim() ? {} : { scale: 0.95 }}
           onClick={handleSend}
-          disabled={!text.trim() || isLoading}
+          disabled={!text.trim()}
           className="send-btn flex-shrink-0"
           id="chat-send-btn"
           aria-label="Send message"
           style={{ touchAction: "manipulation" }}
         >
-          {isLoading ? (
-            <Loader2 size={20} className="animate-spin" />
-          ) : (
-            <Send size={18} className="ml-0.5" />
-          )}
+          <Send size={18} className="ml-0.5" />
         </motion.button>
       </div>
     </div>

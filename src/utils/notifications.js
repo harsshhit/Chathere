@@ -11,6 +11,9 @@ import {
   initAudioUnlock,
   isIOS,
   isStandalone,
+  getNotificationSettings,
+  saveNotificationSettings,
+  playTonePreview,
 } from "./notify";
 
 export {
@@ -23,6 +26,9 @@ export {
   initAudioUnlock,
   isIOS,
   isStandalone,
+  getNotificationSettings,
+  saveNotificationSettings,
+  playTonePreview,
 };
 
 export const playNotificationSound = playMessageSound;

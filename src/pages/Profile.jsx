@@ -19,6 +19,13 @@ import {
   Share2,
   PlusSquare,
   Download,
+  Volume2,
+  VolumeX,
+  Smartphone,
+  Eye,
+  EyeOff,
+  Music,
+  Info,
 } from "lucide-react";
 import { updateProfile } from "firebase/auth";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
@@ -35,6 +42,9 @@ import {
   notifyMessage,
   isIOS,
   isStandalone,
+  getNotificationSettings,
+  saveNotificationSettings,
+  playTonePreview,
 } from "../utils/notify";
 import { useTheme } from "../context/ThemeContext";
 
@@ -56,10 +66,17 @@ const Profile = () => {
   const [permissionState, setPermissionState] = useState(() => getPermissionState());
   const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
   const [testNotificationSent, setTestNotificationSent] = useState(false);
+  const [notifSettings, setNotifSettings] = useState(() => getNotificationSettings());
+
+  const handleUpdateNotifSetting = (key, value) => {
+    const updated = saveNotificationSettings({ [key]: value });
+    if (updated) setNotifSettings(updated);
+  };
 
   useEffect(() => {
     setPermissionState(getPermissionState());
     setIsIOSNonStandalone(isIOS() && !isStandalone());
+    setNotifSettings(getNotificationSettings());
   }, []);
 
   useEffect(() => {
@@ -522,9 +539,10 @@ const Profile = () => {
                   </div>
 
                   <div
-                    className="p-3 rounded-xl space-y-2.5 transition-colors"
+                    className="p-3.5 rounded-xl space-y-3 transition-colors"
                     style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
                   >
+                    {/* Master Permission Header */}
                     <div
                       onClick={handleToggleNotifications}
                       className={`flex items-center justify-between ${
@@ -533,8 +551,8 @@ const Profile = () => {
                           : ""
                       }`}
                     >
-                      <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                        <Bell size={15} className="text-indigo-400" />
+                      <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
+                        <Bell size={16} className="text-indigo-400" />
                         <span>Message Notifications</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -556,8 +574,9 @@ const Profile = () => {
                           </span>
                         ) : (
                           <button
+                            type="button"
                             onClick={handleToggleNotifications}
-                            className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-sm"
                           >
                             Enable
                           </button>
@@ -567,26 +586,164 @@ const Profile = () => {
 
                     {/* Contextual hints depending on real permission state */}
                     {isIOSNonStandalone ? (
-                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
+                      <div className="text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border)] leading-relaxed">
                         On iPhone, add ChatHere to your Home Screen to get notifications: tap <Share2 size={12} className="inline text-indigo-400 mx-0.5" /> Share &gt; <PlusSquare size={12} className="inline text-indigo-400 mx-0.5" /> Add to Home Screen.
                       </div>
                     ) : permissionState === "denied" ? (
-                      <div className="text-xs text-red-400/90 pt-1 border-t border-[var(--border)] leading-relaxed">
+                      <div className="text-xs text-red-400/90 pt-2 border-t border-[var(--border)] leading-relaxed">
                         Notifications are blocked by your browser. To unblock, tap the lock/tune icon in your browser address bar and allow notifications for this site.
                       </div>
                     ) : permissionState === "unsupported" ? (
-                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
+                      <div className="text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border)] leading-relaxed">
                         Your browser does not support web notifications or service workers.
                       </div>
                     ) : null}
 
-                    {/* Step 6 Debug Tooling: Test notification button when granted */}
+                    {/* Notification Preferences Controls */}
+                    <div className="pt-2.5 border-t border-[var(--border)] space-y-3">
+                      {/* Option 1: Notification Sound Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                            {notifSettings.sound ? (
+                              <Volume2 size={13} className="text-indigo-400" />
+                            ) : (
+                              <VolumeX size={13} className="text-[var(--text-muted)]" />
+                            )}
+                            <span>Notification Sound</span>
+                          </div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
+                            Play sound chime on incoming messages
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateNotifSetting("sound", !notifSettings.sound)}
+                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
+                            notifSettings.sound ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
+                          }`}
+                          aria-label="Toggle notification sound"
+                        >
+                          <motion.div
+                            animate={{ x: notifSettings.sound ? 16 : 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                            className="w-4 h-4 rounded-full bg-white shadow-sm"
+                          />
+                        </button>
+                      </div>
+
+                      {/* Tone Selector (visible if sound enabled) */}
+                      {notifSettings.sound && (
+                        <div className="pl-5 space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+                            <span className="flex items-center gap-1">
+                              <Music size={11} className="text-indigo-400" />
+                              <span>Alert Tone</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => playTonePreview(notifSettings.tone)}
+                              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium"
+                            >
+                              ▶ Preview Tone
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[
+                              { id: "chime", label: "Chime" },
+                              { id: "ping", label: "Ping" },
+                              { id: "pop", label: "Pop" },
+                              { id: "bell", label: "Bell" },
+                            ].map((tone) => (
+                              <button
+                                key={tone.id}
+                                type="button"
+                                onClick={() => {
+                                  handleUpdateNotifSetting("tone", tone.id);
+                                  playTonePreview(tone.id);
+                                }}
+                                className={`py-1 text-[11px] font-medium rounded-lg border transition-all ${
+                                  notifSettings.tone === tone.id
+                                    ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-semibold"
+                                    : "bg-[var(--surface-2)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                }`}
+                              >
+                                {tone.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Option 2: Vibration Haptics Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                            <Smartphone size={13} className="text-indigo-400" />
+                            <span>Vibrate on Incoming Message</span>
+                          </div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
+                            Haptic vibration on mobile devices
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateNotifSetting("vibrate", !notifSettings.vibrate)}
+                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
+                            notifSettings.vibrate ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
+                          }`}
+                          aria-label="Toggle vibration"
+                        >
+                          <motion.div
+                            animate={{ x: notifSettings.vibrate ? 16 : 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                            className="w-4 h-4 rounded-full bg-white shadow-sm"
+                          />
+                        </button>
+                      </div>
+
+                      {/* Option 3: Message Content Privacy Preview Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                            {notifSettings.showPreview ? (
+                              <Eye size={13} className="text-indigo-400" />
+                            ) : (
+                              <EyeOff size={13} className="text-[var(--text-muted)]" />
+                            )}
+                            <span>Message Preview</span>
+                          </div>
+                          <div className="text-[11px] text-[var(--text-muted)]">
+                            {notifSettings.showPreview
+                              ? "Show sender name & message snippet"
+                              : "Hide message text for privacy (displays 'New message')"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateNotifSetting("showPreview", !notifSettings.showPreview)}
+                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
+                            notifSettings.showPreview ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
+                          }`}
+                          aria-label="Toggle message preview"
+                        >
+                          <motion.div
+                            animate={{ x: notifSettings.showPreview ? 16 : 0 }}
+                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                            className="w-4 h-4 rounded-full bg-white shadow-sm"
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Test Notification Action */}
                     {permissionState === "granted" && (
                       <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between">
                         <span className="text-xs text-[var(--text-muted)]">
-                          Test OS-level alert & chime
+                          Test alert, chime & vibration
                         </span>
                         <button
+                          type="button"
                           onClick={handleSendTestNotification}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
                           style={{ touchAction: "manipulation" }}
@@ -596,6 +753,21 @@ const Profile = () => {
                         </button>
                       </div>
                     )}
+
+                    {/* Mobile Background Tips Card */}
+                    <div
+                      className="p-2.5 rounded-lg text-[11px] leading-relaxed flex items-start gap-2"
+                      style={{
+                        background: "rgba(99, 102, 241, 0.08)",
+                        border: "1px solid rgba(99, 102, 241, 0.2)",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      <Info size={14} className="text-indigo-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-[var(--text-primary)]">Mobile Chrome Tip:</strong> To keep notifications popping up even when Chrome is minimized or phone is locked, ensure Chrome’s battery is set to <strong>Unrestricted / Optimized</strong> in phone settings (Settings &gt; Apps &gt; Chrome &gt; Battery).
+                      </div>
+                    </div>
                   </div>
 
                   {/* PWA App Installation Option */}

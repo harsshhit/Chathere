@@ -6,6 +6,7 @@ import { ChatContextProvider } from "./context/ChatContext";
 import { InstallProvider } from "./context/InstallContext";
 import useVisualViewport from "./utils/useVisualViewport";
 import { Loader2 } from "lucide-react";
+import GlobalNotificationListener from "./components/GlobalNotificationListener";
 import "./index.css";
 
 const Register = lazy(() => import("./pages/Register"));
@@ -82,6 +83,7 @@ const App = () => {
           <ChatContextProvider>
           <ChunkPreloader />
           <ServiceWorkerMessageListener />
+          <GlobalNotificationListener />
           <Suspense fallback={<LoadingFallback />}>
           <Routes>
             {/*

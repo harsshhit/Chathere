@@ -2,7 +2,7 @@ import React, { useContext, useRef, useState, memo } from "react";
 import { motion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import { Download, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon } from "lucide-react";
+import { Download, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle } from "lucide-react";
 import { getStorage, ref as storageRef, getDownloadURL } from "firebase/storage";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
@@ -31,14 +31,20 @@ const Message = ({ message, lastRead }) => {
   const isOwn = message.senderId === currentUser.uid;
 
   let isRead = false;
-  if (isOwn && lastRead) {
-    const msgTime = message.date?.toMillis ? message.date.toMillis() : 0;
-    if (data.user?.isGroup && data.user?.members) {
-      isRead = data.user.members.some(
-        (m) => m.uid !== currentUser.uid && lastRead[m.uid] >= msgTime
-      );
-    } else {
-      isRead = lastRead[data.user?.uid] >= msgTime;
+  if (isOwn && lastRead && message.status !== "sending") {
+    const msgTime = message.date?.toMillis
+      ? message.date.toMillis()
+      : (message.date instanceof Date
+        ? message.date.getTime()
+        : (typeof message.date === "number" ? message.date : Date.now()));
+    if (msgTime > 0) {
+      if (data.user?.isGroup && data.user?.members) {
+        isRead = data.user.members.some(
+          (m) => m.uid !== currentUser.uid && (lastRead[m.uid] || 0) >= msgTime
+        );
+      } else {
+        isRead = (lastRead[data.user?.uid] || 0) >= msgTime;
+      }
     }
   }
 
@@ -176,7 +182,11 @@ const Message = ({ message, lastRead }) => {
                 {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
                 {formatDate(message.date)}
                 {isOwn && (
-                  isRead ? (
+                  message.status === "sending" ? (
+                    <Clock size={12} className="opacity-75 inline-block" aria-label="Sending" />
+                  ) : message.status === "failed" ? (
+                    <AlertCircle size={13} className="text-red-300 inline-block" aria-label="Failed to send" title="Failed to send" />
+                  ) : isRead ? (
                     <CheckCheck size={14} style={{ color: "#bae6fd" }} aria-label="Read" />
                   ) : (
                     <Check size={14} aria-label="Sent" />
@@ -229,7 +239,11 @@ const Message = ({ message, lastRead }) => {
               {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
               {formatDate(message.date)}
               {isOwn && (
-                isRead ? (
+                message.status === "sending" ? (
+                  <Clock size={11} className="opacity-75 inline-block" aria-label="Sending" />
+                ) : message.status === "failed" ? (
+                  <AlertCircle size={12} className="text-red-300 inline-block" aria-label="Failed to send" title="Failed to send" />
+                ) : isRead ? (
                   <CheckCheck size={12} className="text-blue-300 opacity-90" />
                 ) : (
                   <Check size={12} className="opacity-80" />
@@ -259,7 +273,7 @@ const Message = ({ message, lastRead }) => {
         )}
       </div>
 
-      {isOwn && !isEditing && (
+      {isOwn && !isEditing && message.status !== "sending" && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1 mb-1">
           {message.text && (
             <button
