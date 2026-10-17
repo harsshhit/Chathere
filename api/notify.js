@@ -46,14 +46,21 @@ module.exports = async (req, res) => {
     const requestBody =
       typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const { chatId, recipientUids, title, body } = requestBody || {};
-    if (
-      typeof chatId !== "string" ||
-      !chatId ||
+    let invalidField = null;
+    if (typeof chatId !== "string" || !chatId) {
+      invalidField = "chatId";
+    } else if (
       !Array.isArray(recipientUids) ||
-      recipientUids.some((uid) => typeof uid !== "string") ||
-      typeof title !== "string" ||
-      typeof body !== "string"
+      recipientUids.some((uid) => typeof uid !== "string")
     ) {
+      invalidField = "recipientUids";
+    } else if (typeof title !== "string") {
+      invalidField = "title";
+    } else if (typeof body !== "string") {
+      invalidField = "body";
+    }
+    if (invalidField) {
+      console.warn("notify invalid body field:", invalidField);
       return res.status(400).json({ error: "Invalid request body" });
     }
 
@@ -73,10 +80,12 @@ module.exports = async (req, res) => {
         return chatDoc.exists && hasChat(chatDoc.data() || {}, chatId) ? uid : null;
       })
     );
+    const authorizedRecipientUids = authorizedRecipients.filter(Boolean);
+    console.info("notify recipients authorized:", authorizedRecipientUids.length);
 
     const tokenOwners = new Map();
     await Promise.all(
-      authorizedRecipients.filter(Boolean).map(async (uid) => {
+      authorizedRecipientUids.map(async (uid) => {
         const tokenDoc = await db.collection("fcmTokens").doc(uid).get();
         const savedTokens = tokenDoc.data()?.tokens;
         if (!Array.isArray(savedTokens)) return;
@@ -90,12 +99,15 @@ module.exports = async (req, res) => {
     );
 
     const tokenEntries = [...tokenOwners.entries()];
+    console.info("notify tokens found:", tokenEntries.length);
     if (tokenEntries.length === 0) {
-      return res.status(200).json({ sent: 0, failed: 0 });
+      console.info("notify sent/failed:", 0, 0);
+      return res.status(200).json({ sent: 0, failed: 0, errorCodes: [] });
     }
 
     const messaging = admin.messaging(app);
     const deadTokensByUid = new Map();
+    const errorCodes = new Set();
     let sent = 0;
     let failed = 0;
 
@@ -115,6 +127,12 @@ module.exports = async (req, res) => {
       sent += result.successCount;
       failed += result.failureCount;
       result.responses.forEach((response, index) => {
+        if (!response.success) {
+          const errorCode = response.error?.code || "unknown";
+          errorCodes.add(errorCode);
+          console.error("push failed:", errorCode);
+        }
+
         const errorCode = response.error?.code;
         if (
           errorCode !== "messaging/registration-token-not-registered" &&
@@ -139,8 +157,10 @@ module.exports = async (req, res) => {
       )
     );
 
-    return res.status(200).json({ sent, failed });
-  } catch {
+    console.info("notify sent/failed:", sent, failed);
+    return res.status(200).json({ sent, failed, errorCodes: [...errorCodes] });
+  } catch (error) {
+    console.error("notify error:", error && error.code, error && error.message);
     return res.status(500).json({ error: "Notification request failed" });
   }
 };

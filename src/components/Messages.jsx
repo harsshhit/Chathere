@@ -10,6 +10,8 @@ import { usePendingMessages, pendingMessagesStore } from "../utils/pendingMessag
 
 const Messages = () => {
   const [messages, setMessages] = useState([]);
+  const [reactions, setReactions] = useState({});
+  const [liveMessageIds, setLiveMessageIds] = useState(() => new Set());
   const [typing, setTyping] = useState({});
   const [lastRead, setLastRead] = useState({});
   const { data } = useContext(ChatContext);
@@ -37,6 +39,8 @@ const Messages = () => {
   const initialScrollComplete = useRef(false);
   const wasNearBottomRef = useRef(true);
   const loadedChatId = useRef(data?.chatId || null);
+  const observedMessageIdsRef = useRef(new Set());
+  const hasInitialSnapshotRef = useRef(false);
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const scrollTimeoutRef = useRef(null);
@@ -80,6 +84,10 @@ const Messages = () => {
       previousMessagesLength.current = 0;
       loadedChatId.current = data.chatId;
       setMessages([]);
+      setReactions({});
+      setLiveMessageIds(new Set());
+      observedMessageIdsRef.current = new Set();
+      hasInitialSnapshotRef.current = false;
       setShowScrollBottom(false);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
@@ -93,7 +101,19 @@ const Messages = () => {
         const newMessages = docData.messages || [];
         const currentLastRead = docData.lastRead || {};
 
+        const currentIds = new Set(newMessages.map((message) => message.id).filter(Boolean));
+        if (hasInitialSnapshotRef.current) {
+          const arrivedIds = [...currentIds].filter((id) => !observedMessageIdsRef.current.has(id));
+          if (arrivedIds.length > 0) {
+            setLiveMessageIds((existing) => new Set([...existing, ...arrivedIds]));
+          }
+        } else {
+          hasInitialSnapshotRef.current = true;
+        }
+        observedMessageIdsRef.current = currentIds;
+
         setMessages(newMessages);
+        setReactions(docData.reactions || {});
         setTyping(docData.typing || {});
         setLastRead(currentLastRead);
         previousMessagesLength.current = newMessages.length;
@@ -358,7 +378,13 @@ const Messages = () => {
             </div>
           ) : (
             displayMessages.map((m, index) => (
-              <Message key={m.id || index} message={m} lastRead={lastRead} />
+              <Message
+                key={m.id || index}
+                message={m}
+                lastRead={lastRead}
+                reactions={reactions?.[m.id] || {}}
+                isLive={m.status === "sending" || liveMessageIds.has(m.id)}
+              />
             ))
           )}
 

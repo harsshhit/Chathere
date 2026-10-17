@@ -278,6 +278,42 @@
     box-shadow: 0 2px 8px var(--shadow-sm);
   }
 
+  .love-message-bubble {
+    outline: 1px solid rgba(244, 63, 94, 0.58);
+    box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.12), 0 0 22px rgba(225, 29, 72, 0.22);
+  }
+
+  .love-word-static {
+    color: #e11d48;
+    background: linear-gradient(90deg, #fb7185, #e11d48);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+  }
+
+  .love-word-pulse {
+    color: #e11d48;
+    background: linear-gradient(90deg, #fb7185, #e11d48);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+    animation: love-heartbeat 1.6s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  @keyframes love-heartbeat {
+    0%, 100% { text-shadow: 0 0 0 rgba(225, 29, 72, 0); }
+    12% { text-shadow: 0 0 8px rgba(225, 29, 72, 0.42); }
+    24% { text-shadow: 0 0 2px rgba(225, 29, 72, 0.15); }
+    36% { text-shadow: 0 0 7px rgba(251, 113, 133, 0.38); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .love-word-pulse { animation: none; }
+  }
+
   .chat-item {
     @apply flex items-center gap-3 px-4 py-3.5 cursor-pointer transition-all duration-200 rounded-xl mx-2;
   }

@@ -1,5 +1,5 @@
 import React, { useContext, useState, useRef, useEffect } from "react";
-import { Send, Smile } from "lucide-react";
+import { Send, Smile, X } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
 import {
@@ -12,7 +12,7 @@ import {
   updateDoc,
   increment,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { auth, db } from "../firebase";
 import { v4 as uuid } from "uuid";
 import EmojiPicker from "emoji-picker-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,11 +26,31 @@ const Input = () => {
   const [showGifPicker, setShowGifPicker] = useState(false);
 
   const { currentUser } = useContext(AuthContext);
-  const { data } = useContext(ChatContext);
+  const { data, replyingTo, setReplyingTo } = useContext(ChatContext);
   const { theme } = useTheme();
   const pickerRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    if (replyingTo) {
+      inputRef.current?.focus();
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [replyingTo]);
+
+  const getReplyPayload = () => {
+    if (!replyingTo) return {};
+    return {
+      replyTo: {
+        id: replyingTo.id || "",
+        senderId: replyingTo.senderId || "",
+        senderName: replyingTo.senderName || "User",
+        text: String(replyingTo.text || "").slice(0, 100),
+        type: ["text", "gif", "image"].includes(replyingTo.type) ? replyingTo.type : "text",
+      },
+    };
+  };
 
   const stopTyping = () => {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -128,12 +148,47 @@ const Input = () => {
     }
   };
 
+  const notifyRecipients = async (recipientUids, body) => {
+    if (recipientUids.length === 0) {
+      console.warn("notify skipped: no recipients");
+      return;
+    }
+
+    try {
+      const firebaseUser = auth.currentUser;
+      const idToken = await firebaseUser.getIdToken();
+      const response = await fetch("/api/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + idToken,
+        },
+        body: JSON.stringify({
+          chatId: data.chatId,
+          recipientUids,
+          title: currentUser.displayName || "New message",
+          body,
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn("notify failed", response.status, await response.text());
+        return;
+      }
+
+      console.info("notify ok", await response.json());
+    } catch (error) {
+      console.warn("notify error", error);
+    }
+  };
+
   const handleSend = () => {
     const msgText = text.trim();
     if (!msgText || !data.chatId) return;
 
     // Immediately clear input and reset typing
     setText("");
+    setReplyingTo(null);
     stopTyping();
     inputRef.current?.focus();
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -150,6 +205,7 @@ const Input = () => {
       senderPhoto: currentUser.photoURL,
       date: optimisticDate,
       status: "sending",
+      ...getReplyPayload(),
     };
 
     pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
@@ -165,6 +221,7 @@ const Input = () => {
           senderName: currentUser.displayName,
           senderPhoto: currentUser.photoURL,
           date: Timestamp.fromDate(optimisticDate),
+          ...getReplyPayload(),
         };
 
         try {
@@ -189,26 +246,7 @@ const Input = () => {
           ? [data.user.uid]
           : [];
 
-        void (async () => {
-          try {
-            const idToken = await currentUser.getIdToken();
-            fetch("/api/notify", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: "Bearer " + idToken,
-              },
-              body: JSON.stringify({
-                chatId: data.chatId,
-                recipientUids,
-                title: currentUser.displayName,
-                body: msgText || "📷 Photo",
-              }),
-            }).catch(() => undefined);
-          } catch (error) {
-            return undefined;
-          }
-        })();
+        void notifyRecipients(recipientUids, msgText);
       } catch (error) {
         console.error("Error sending message:", error);
         pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
@@ -220,6 +258,7 @@ const Input = () => {
     setShowGifPicker(false);
     const msgText = text.trim();
     setText("");
+    setReplyingTo(null);
     stopTyping();
     inputRef.current?.focus();
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -238,6 +277,7 @@ const Input = () => {
       senderPhoto: currentUser.photoURL,
       date: optimisticDate,
       status: "sending",
+      ...getReplyPayload(),
     };
 
     pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
@@ -253,6 +293,7 @@ const Input = () => {
           senderPhoto: currentUser.photoURL,
           date: Timestamp.fromDate(optimisticDate),
           img: gifUrl,
+          ...getReplyPayload(),
         };
 
         try {
@@ -268,6 +309,16 @@ const Input = () => {
         }
 
         await ensureChatDocAndUserChats(msgText || "Sent a GIF");
+
+        const recipientUids = data.user?.isGroup
+          ? (data.user.members || [])
+              .map((member) => member.uid)
+              .filter((uid) => uid && uid !== currentUser.uid)
+          : data.user?.uid
+          ? [data.user.uid]
+          : [];
+
+        void notifyRecipients(recipientUids, "GIF");
       } catch (err) {
         console.error("Error sending GIF:", err);
         pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
@@ -276,6 +327,11 @@ const Input = () => {
   };
 
   const handleKeyDown = (e) => {
+    if (e.key === "Escape" && replyingTo) {
+      e.preventDefault();
+      setReplyingTo(null);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -331,6 +387,39 @@ const Input = () => {
         paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
       }}
     >
+      <AnimatePresence>
+        {replyingTo && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: 6 }}
+            animate={{ opacity: 1, height: "auto", y: 0 }}
+            exit={{ opacity: 0, height: 0, y: 6 }}
+            transition={{ duration: 0.18 }}
+            className="overflow-hidden"
+          >
+            <div
+              className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2"
+              style={{ background: "var(--surface-3)", borderLeft: "3px solid var(--primary-light)" }}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate" style={{ color: "var(--primary-light)" }}>
+                  Replying to {replyingTo.senderName || "User"}
+                </p>
+                <p className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
+                  {replyingTo.type === "image" ? "📷 Photo" : replyingTo.type === "gif" ? "GIF" : replyingTo.text}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReplyingTo(null)}
+                className="icon-btn flex-shrink-0 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                aria-label="Cancel reply"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="flex items-center gap-2">
         <motion.button
           type="button"

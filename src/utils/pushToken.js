@@ -16,7 +16,10 @@ export const registerPushToken = async (currentUser) => {
       serviceWorkerRegistration: registration,
     });
 
-    if (!token) return;
+    if (!token) {
+      console.info("push: no token returned");
+      return;
+    }
 
     // Firestore rules should allow writes to fcmTokens/{uid} only when request.auth.uid == uid.
     await setDoc(
@@ -24,7 +27,8 @@ export const registerPushToken = async (currentUser) => {
       { tokens: arrayUnion(token), updatedAt: serverTimestamp() },
       { merge: true }
     );
+    console.info("push token saved");
   } catch (error) {
-    console.warn("Push token registration failed:", error);
+    console.warn("Push token registration failed:", error?.code, error?.message);
   }
 };
