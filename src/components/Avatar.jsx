@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { optimizeUrl } from "../utils/cloudinary";
 
 /**
  * Validate that an avatar URL is a secure https URL under 2000 chars.
@@ -106,7 +107,7 @@ const Avatar = ({ src, name, alt, size, className = "", style = {} }) => {
 
   return (
     <img
-      src={src}
+      src={optimizeUrl(src, 96)}
       alt={displayName}
       referrerPolicy="no-referrer"
       loading="lazy"

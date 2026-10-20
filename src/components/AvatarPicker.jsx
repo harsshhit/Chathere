@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Shuffle, Check, Loader2, Sparkles, Image as ImageIcon, Link as LinkIcon } from "lucide-react";
+import { X, Shuffle, Check, Loader2, Sparkles, Image as ImageIcon, Link as LinkIcon, Upload } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Avatar, { isValidAvatarUrl } from "./Avatar";
 import GifPicker from "./GifPicker";
+import { uploadImage } from "../utils/cloudinary";
 
 const DICEBEAR_STYLES = [
   { id: "bottts", label: "Robots" },
@@ -29,8 +30,16 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
   const [urlValid, setUrlValid] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const debounceTimeout = useRef(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => () => {
+    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+  }, [localPreviewUrl]);
 
   // Initialize selectedUrl from props when modal opens
   useEffect(() => {
@@ -52,6 +61,8 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
   }, [isOpen, isSaving, onClose]);
 
   const handleShuffle = () => {
+    setSelectedFile(null);
+    setLocalPreviewUrl("");
     const newSeed = Math.random().toString(36).substring(2, 9);
     setSeed(newSeed);
     const newUrl = getDiceBearUrl(selectedStyle, newSeed);
@@ -59,6 +70,8 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
   };
 
   const handleSelectStyle = (styleId) => {
+    setSelectedFile(null);
+    setLocalPreviewUrl("");
     setSelectedStyle(styleId);
     const newUrl = getDiceBearUrl(styleId, seed);
     setSelectedUrl(newUrl);
@@ -66,8 +79,23 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
 
   const handleGifSelect = (gifUrl) => {
     if (isValidAvatarUrl(gifUrl)) {
+      setSelectedFile(null);
+      setLocalPreviewUrl("");
       setSelectedUrl(gifUrl);
     }
+  };
+
+  const handleFileSelect = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedFile(file);
+    setLocalPreviewUrl(previewUrl);
+    setSelectedUrl(previewUrl);
+    setSaveError(null);
+    setUploadProgress(0);
   };
 
   // Validate custom image URL with an Image() element
@@ -100,6 +128,8 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
         setUrlTesting(false);
         setUrlValid(true);
         setUrlError(null);
+        setSelectedFile(null);
+        setLocalPreviewUrl("");
         setSelectedUrl(trimmed);
       };
       img.onerror = () => {
@@ -112,14 +142,22 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
   };
 
   const handleSaveClick = async () => {
-    if (!selectedUrl || !isValidAvatarUrl(selectedUrl)) {
+    if (!selectedFile && (!selectedUrl || !isValidAvatarUrl(selectedUrl))) {
       setSaveError("Please select a valid avatar image.");
       return;
     }
     setIsSaving(true);
     setSaveError(null);
     try {
-      await onSave(selectedUrl);
+      const photoUrl = selectedFile
+        ? await uploadImage(selectedFile, { folder: "chathere/profiles", onProgress: setUploadProgress })
+        : selectedUrl;
+      if (selectedFile) {
+        setSelectedUrl(photoUrl);
+        setSelectedFile(null);
+        setLocalPreviewUrl("");
+      }
+      await onSave(photoUrl);
       onClose();
     } catch (err) {
       setSaveError(err.message || "Failed to update profile picture.");
@@ -182,15 +220,17 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
             }}
           >
             <div className="relative">
-              <Avatar
-                src={selectedUrl}
-                name={displayName || "Preview"}
-                size={68}
-                className="w-[68px] h-[68px] rounded-2xl object-cover shadow-sm"
-                style={{
-                  border: "2px solid rgba(99,102,241,0.5)",
-                }}
-              />
+              {localPreviewUrl ? (
+                <img src={localPreviewUrl} alt={displayName || "Preview"} className="h-[68px] w-[68px] rounded-2xl object-cover shadow-sm" style={{ border: "2px solid rgba(99,102,241,0.5)" }} />
+              ) : (
+                <Avatar
+                  src={selectedUrl}
+                  name={displayName || "Preview"}
+                  size={68}
+                  className="w-[68px] h-[68px] rounded-2xl object-cover shadow-sm"
+                  style={{ border: "2px solid rgba(99,102,241,0.5)" }}
+                />
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold uppercase tracking-wider text-[var(--primary-light)] mb-0.5">
@@ -199,9 +239,11 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
               <div className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>
                 {displayName || "Your Profile"}
               </div>
-              <div className="text-[11px] truncate text-[var(--text-muted)]">
-                No storage upload required
-              </div>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSaving} className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-500 disabled:opacity-50">
+                <Upload size={12} /> Upload image
+              </button>
+              {isSaving && selectedFile && <div className="mt-1 h-1 w-full overflow-hidden rounded bg-black/10"><div className="h-full bg-indigo-500" style={{ width: `${uploadProgress}%` }} /></div>}
             </div>
           </div>
 
@@ -415,7 +457,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                 ) : (
                   <>
                     <Check size={13} />
-                    <span>Save Photo</span>
+                    <span>{saveError && selectedFile ? "Retry upload" : "Save Photo"}</span>
                   </>
                 )}
               </button>

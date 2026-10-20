@@ -67,6 +67,20 @@ const Profile = ({ settings = false }) => {
   const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
   const [testNotificationSent, setTestNotificationSent] = useState(false);
   const [notifSettings, setNotifSettings] = useState(() => getNotificationSettings());
+  const [enterToSend, setEnterToSend] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const saved = window.localStorage.getItem("chathere:enterToSend");
+    if (saved === null) {
+      return !window.matchMedia("(pointer: coarse)").matches;
+    }
+    return saved === "true";
+  });
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("chathere:enterToSend", String(enterToSend));
+    }
+  }, [enterToSend]);
 
   const handleUpdateNotifSetting = (key, value) => {
     const updated = saveNotificationSettings({ [key]: value });
@@ -545,6 +559,32 @@ const Profile = ({ settings = false }) => {
                     className="p-3.5 rounded-xl space-y-3 transition-colors"
                     style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
                   >
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                          <Send size={13} className="text-indigo-400" />
+                          <span>Enter to send</span>
+                        </div>
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          {enterToSend ? "Press Enter to send a message" : "Press Enter for a newline; send with Ctrl/Cmd + Enter"}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEnterToSend((current) => !current)}
+                        className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
+                          enterToSend ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
+                        }`}
+                        aria-label="Toggle Enter to send"
+                      >
+                        <motion.div
+                          animate={{ x: enterToSend ? 16 : 0 }}
+                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                          className="w-4 h-4 rounded-full bg-white shadow-sm"
+                        />
+                      </button>
+                    </div>
+
                     {/* Master Permission Header */}
                     <div
                       onClick={handleToggleNotifications}
