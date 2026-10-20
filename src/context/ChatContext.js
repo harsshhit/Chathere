@@ -18,9 +18,11 @@ export const ChatContextProvider = ({ children }) => {
   const [loadingChat, setLoadingChat] = useState(false);
   const [chatNotFound, setChatNotFound] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
 
   useEffect(() => {
     setReplyingTo(null);
+    setEditingMessage(null);
   }, [urlChatId]);
 
   const userChatsRef = useRef({});
@@ -209,9 +211,11 @@ export const ChatContextProvider = ({ children }) => {
       chatNotFound,
       replyingTo,
       setReplyingTo,
+      editingMessage,
+      setEditingMessage,
       dispatch,
     }),
-    [urlChatId, activeUser, loadingChat, chatNotFound, replyingTo, dispatch]
+    [urlChatId, activeUser, loadingChat, chatNotFound, replyingTo, editingMessage, dispatch]
   );
 
   return (

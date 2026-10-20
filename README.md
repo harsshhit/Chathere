@@ -1,77 +1,44 @@
 # ChatHere
 
-A modern real-time chat application built with React and Firebase. This full-featured chat platform offers a seamless messaging experience with rich features including real-time messaging, multimedia sharing, and comprehensive user management.
+ChatHere is a real-time chat application built with React and Firebase.
 
-Live Link: https://chat-here-eta.vercel.app
+## Features
 
-## Key Features
-
-### Authentication & User Management
-- Google Sign-in integration
-- User profile management with avatars
-- User presence tracking
-
-### Messaging Capabilities
-- Real-time message delivery
-- Message timestamps with smart formatting
-- Message status indicators
-- Message history preservation
-
-### Media Sharing
-- Image upload and sharing
-- Image preview functionality
-- Full-screen image viewer
-- Image download capability with progress tracking
-
-### User Interface
-- Modern, clean design with Tailwind CSS
-- Responsive layout for all devices
-- Sidebar for chat navigation
-- Smooth transitions and animations
-- Loading states and indicators
-
-### Chat Management
-- Chat search functionality
-- Last message preview
-- Chat organization and sorting
-
-## Screenshots
-
-### Desktop View
-![Chat Interface](screenshots/chat-interface.png)
-*Main chat interface showing real-time messaging and user status*
-
-### Media Handling
-![Image Preview](screenshots/image-preview.png)
-*Image sharing and preview functionality*
-
-### Mobile Experience
-![Mobile View](screenshots/mobile-view.png)
-*Responsive mobile interface*
-
-Suggested Additional Screenshots:
-- Authentication screen
-- User profile management
-- Group chat interface
-- File attachment interface
+- Email/password and Google authentication
+- One-to-one and group chats with live messages
+- Message replies, reactions, editing, and deletion
+- Emoji and GIF messaging
+- User profiles, avatars, and light/dark themes
+- Browser notifications and Firebase Cloud Messaging web push
+- Responsive installable web app
 
 ## Tech Stack
 
-### Frontend
-- React.js
-- Tailwind CSS for styling
-- Framer Motion for animations
-- Lucide React Icons
-- Context API for state management
+React 18, Create React App, React Router, Tailwind CSS, Framer Motion, Lucide, Firebase Authentication, Cloud Firestore, Firebase Storage, Firebase Cloud Messaging, and Vercel serverless functions.
 
-### Backend & Services
-- Firebase v9
-  - Authentication
-  - Firestore Database
-  - Cloud Storage
-  - Real-time listeners
-  - Security Rules
+## Environment Variables
 
-## Installation & Setup
+Set these in a local `.env` file for development and in Vercel project settings for deployment. Do not commit secret values.
 
-1. Clone the repository
+- `REACT_APP_FIREBASE_API_KEY`
+- `REACT_APP_FIREBASE_AUTH_DOMAIN`
+- `REACT_APP_FIREBASE_PROJECT_ID`
+- `REACT_APP_FIREBASE_STORAGE_BUCKET`
+- `REACT_APP_FIREBASE_MESSAGING_SENDER_ID`
+- `REACT_APP_FIREBASE_APP_ID`
+- `REACT_APP_FIREBASE_MEASUREMENT_ID`
+- `REACT_APP_GIF_API_KEY`
+- `REACT_APP_FIREBASE_VAPID_KEY`
+- `FIREBASE_SERVICE_ACCOUNT_B64` (server-side Vercel function)
+
+## Run Locally
+
+```sh
+npm install
+npm start
+npm run build
+```
+
+## Vercel Deployment
+
+Import the repository into Vercel and configure the environment variables above in the project settings. Vercel builds the CRA app and deploys the `/api` serverless function. Keep `FIREBASE_SERVICE_ACCOUNT_B64` server-side and do not expose it as a `REACT_APP_` variable.

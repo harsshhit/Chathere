@@ -2,13 +2,13 @@ import React, { useContext, useRef, useState, useEffect, memo } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
-import { Download, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile } from "lucide-react";
-import { getStorage, ref as storageRef, getDownloadURL } from "firebase/storage";
+import { Download, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile, FileText, Music4, Video } from "lucide-react";
 import { deleteField, doc, FieldPath, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import Avatar from "./Avatar";
 import LoveEffect from "./LoveEffect";
 import { getLoveMatches, hasLoveMessage } from "../utils/loveDetect";
+import { optimizeUrl } from "../utils/cloudinary";
 
 const playedLoveMessageIds = new Set();
 
@@ -51,7 +51,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   const [editText, setEditText] = useState(message.text || "");
   const [savingEdit, setSavingEdit] = useState(false);
   const { currentUser } = useContext(AuthContext);
-  const { data, setReplyingTo } = useContext(ChatContext);
+  const { data, setReplyingTo, setEditingMessage } = useContext(ChatContext);
   const ref = useRef();
   const reactionPickerRef = useRef(null);
   const longPressTimerRef = useRef(null);
@@ -103,6 +103,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
 
   const handleReply = () => {
     if (!message.id) return;
+    setEditingMessage(null);
     const type = message.type === "image" ? "image" : message.type === "gif" || message.img ? "gif" : "text";
     setReplyingTo({
       id: message.id,
@@ -268,26 +269,13 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
     e.stopPropagation();
     setIsDownloading(true);
     try {
-      if (message.img.startsWith("http") && !message.img.includes("firebasestorage")) {
-        const link = document.createElement("a");
-        link.href = message.img;
-        link.setAttribute("download", `chat-image-${message.id || Date.now()}.gif`);
-        link.setAttribute("target", "_blank");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        const storage = getStorage();
-        const imageRef = storageRef(storage, message.img);
-        const url = await getDownloadURL(imageRef);
-        const link = document.createElement("a");
-        link.href = url;
-        link.setAttribute("download", `chat-image-${message.id || Date.now()}.jpg`);
-        link.setAttribute("target", "_blank");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
+      const link = document.createElement("a");
+      link.href = message.img;
+      link.setAttribute("download", `chat-image-${message.id || Date.now()}`);
+      link.setAttribute("target", "_blank");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } catch (error) {
       console.error("Error downloading image:", error);
     } finally {
@@ -418,7 +406,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
               </div>
             )}
             <img
-              src={message.img}
+              src={isExpanded ? message.img : optimizeUrl(message.img, 400)}
               alt="attachment"
               className={`rounded-2xl object-cover transition-all duration-300 ${
                 isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
@@ -428,13 +416,12 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                 boxShadow: "0 8px 32px var(--shadow)",
               }}
               onError={(e) => {
-                // Replace broken GIF (e.g. old Tenor URLs) with a friendly placeholder
                 e.currentTarget.onerror = null;
                 e.currentTarget.style.display = "none";
                 const placeholder = document.createElement("div");
                 placeholder.style.cssText =
                   "display:flex;align-items:center;justify-content:center;padding:12px 16px;border-radius:12px;font-size:11px;color:var(--text-muted);background:var(--surface-3);border:1px solid var(--border);min-width:120px;text-align:center;";
-                placeholder.textContent = "GIF unavailable";
+                placeholder.textContent = "Image unavailable";
                 e.currentTarget.parentNode?.insertBefore(placeholder, e.currentTarget.nextSibling);
               }}
             />
@@ -483,6 +470,47 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
               </motion.button>
             )}
           </motion.div>
+        )}
+        {message.file?.url && (
+          <div
+            className="mt-1 w-full max-w-sm overflow-hidden rounded-xl border"
+            style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}
+          >
+            {message.file.mime?.startsWith("video/") ? (
+              <video
+                src={message.file.url}
+                controls
+                preload="metadata"
+                className="max-h-[360px] w-full bg-black"
+                aria-label={message.file.name || "Video attachment"}
+              />
+            ) : message.file.mime?.startsWith("audio/") ? (
+              <div className="flex items-center gap-3 p-3">
+                <Music4 size={18} className="flex-shrink-0 text-[var(--primary-light)]" />
+                <audio src={message.file.url} controls preload="metadata" className="min-w-0 flex-1" aria-label={message.file.name || "Audio attachment"} />
+              </div>
+            ) : (
+              <a
+                href={message.file.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-3 p-3 transition-colors hover:bg-[var(--hover)]"
+                aria-label={`Download ${message.file.name || "attachment"}`}
+              >
+                <FileText size={20} className="flex-shrink-0 text-[var(--primary-light)]" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-primary)]">
+                  {message.file.name || "Attachment"}
+                </span>
+                <Download size={16} className="flex-shrink-0 text-[var(--text-muted)]" />
+              </a>
+            )}
+            {(message.file.mime?.startsWith("video/") || message.file.mime?.startsWith("audio/")) && (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                {message.file.mime.startsWith("video/") ? <Video size={14} /> : <Music4 size={14} />}
+                <span className="min-w-0 truncate">{message.file.name || "Media attachment"}</span>
+              </div>
+            )}
+          </div>
         )}
         </motion.div>
         {loveBurstKey > 0 && (
@@ -541,7 +569,11 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
             <>
           {message.text && (
             <button
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                setEditingMessage(message);
+                setReplyingTo(null);
+                setIsEditing(false);
+              }}
               className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors"
               title="Edit message"
               aria-label="Edit message"

@@ -1,11 +1,12 @@
 import React, { useState, useContext, useEffect } from "react";
-import { X, Check, Users, Search as SearchIcon, Loader2 } from "lucide-react";
+import { X, Check, Users, Search as SearchIcon, Loader2, Upload } from "lucide-react";
 import { motion } from "framer-motion";
 import { collection, query, getDocs, setDoc, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { v4 as uuid } from "uuid";
 import Avatar from "./Avatar";
+import { uploadImage } from "../utils/cloudinary";
 
 const CreateGroup = ({ onClose }) => {
   const { currentUser } = useContext(AuthContext);
@@ -15,6 +16,17 @@ const CreateGroup = ({ onClose }) => {
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [groupPhoto, setGroupPhoto] = useState(null);
+  const [groupPhotoUrl, setGroupPhotoUrl] = useState("");
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [photoError, setPhotoError] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = React.useRef(null);
+
+  useEffect(() => () => {
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+  }, [photoPreviewUrl]);
 
   useEffect(() => {
     const searchUsers = async () => {
@@ -56,6 +68,44 @@ const CreateGroup = ({ onClose }) => {
     }
   };
 
+  const handleGroupPhotoSelect = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setGroupPhoto(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    setPhotoError("");
+    setUploadingPhoto(true);
+    setUploadProgress(0);
+    try {
+      const url = await uploadImage(file, { folder: "chathere/groups", onProgress: setUploadProgress });
+      setGroupPhotoUrl(url);
+      setPhotoPreviewUrl(url);
+    } catch (error) {
+      setGroupPhotoUrl("");
+      setPhotoError(error.message || "Group photo upload failed. Please retry.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const retryGroupPhotoUpload = async () => {
+    if (!groupPhoto || uploadingPhoto) return;
+    setUploadingPhoto(true);
+    setUploadProgress(0);
+    setPhotoError("");
+    try {
+      const url = await uploadImage(groupPhoto, { folder: "chathere/groups", onProgress: setUploadProgress });
+      setGroupPhotoUrl(url);
+      setPhotoPreviewUrl(url);
+    } catch (error) {
+      setPhotoError(error.message || "Group photo upload failed. Please retry.");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
   const handleCreateGroup = async () => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
     setCreating(true);
@@ -72,7 +122,7 @@ const CreateGroup = ({ onClose }) => {
       const groupData = {
         uid: groupId,
         displayName: groupName,
-        photoURL: `https://api.dicebear.com/9.x/identicon/svg?seed=${encodeURIComponent(groupName)}`,
+        photoURL: groupPhotoUrl || `https://api.dicebear.com/9.x/identicon/svg?seed=${encodeURIComponent(groupName)}`,
         isGroup: true,
         members: groupMembers,
         admin: currentUser.uid,
@@ -140,6 +190,16 @@ const CreateGroup = ({ onClose }) => {
           />
         </div>
 
+        <div className="flex items-center gap-3">
+          <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handleGroupPhotoSelect} />
+          <button type="button" onClick={() => photoInputRef.current?.click()} disabled={uploadingPhoto} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
+            {uploadingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+            {uploadingPhoto ? `Uploading ${uploadProgress}%` : "Group photo"}
+          </button>
+          {photoPreviewUrl && <img src={photoPreviewUrl} alt="Group" className="h-10 w-10 rounded-lg object-cover" />}
+          {photoError && <div className="min-w-0 flex-1 text-[11px] text-red-500"><span className="block truncate">{photoError}</span><button type="button" onClick={retryGroupPhotoUpload} disabled={uploadingPhoto} className="font-semibold underline disabled:opacity-50">Retry</button></div>}
+        </div>
+
         <div>
           <label className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Add Members ({selectedUsers.length})</label>
           <div className="relative mb-3">
@@ -189,7 +249,7 @@ const CreateGroup = ({ onClose }) => {
 
         <button 
           onClick={handleCreateGroup}
-          disabled={creating || !groupName.trim() || selectedUsers.length === 0}
+          disabled={creating || uploadingPhoto || (groupPhoto && !groupPhotoUrl) || !groupName.trim() || selectedUsers.length === 0}
           className="w-full py-3 mt-2 rounded-xl text-sm font-bold flex items-center justify-center transition-all disabled:opacity-50 hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)] disabled:shadow-none"
           style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)", color: "white" }}
         >

@@ -2,9 +2,14 @@ node_modules
 build
 .env
 .env.local
+.env.*.local
 .env.development.local
 .env.test.local
 .env.production.local
+.vercel
+coverage
+serviceAccount*.json
 .DS_Store
+*.log
 .chat-89b0a-firebase-adminsdk-5w0un-6b62c0c1a6.json
 
