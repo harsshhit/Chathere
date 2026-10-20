@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
 import Messages from "./Messages";
 import Input from "./Input";
-import { ChatContext, ContactPanelContext } from "../context/ChatContext";
+import { ChatContext, ContactPanelContext, ContactPanelActionsContext } from "../context/ChatContext";
 import Avatar from "./Avatar";
 import ContactPanel from "./ContactPanel";
 
@@ -86,7 +86,8 @@ const ChatNotFound = ({ onBack }) => (
 
 const Chat = () => {
   const { data, loadingChat, chatNotFound } = useContext(ChatContext);
-  const { contactPanel, openContactPanel } = useContext(ContactPanelContext);
+  const { contactPanel } = useContext(ContactPanelContext);
+  const { openContactPanel } = useContext(ContactPanelActionsContext);
   const { chatId } = useParams();
   const navigate = useNavigate();
 
