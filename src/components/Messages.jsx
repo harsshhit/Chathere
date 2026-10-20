@@ -1,5 +1,5 @@
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import React, { useContext, useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { memo, useContext, useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
 import { ChatContext } from "../context/ChatContext";
 import { AuthContext } from "../context/AuthContext";
 import { db } from "../firebase";
@@ -7,6 +7,7 @@ import Message from "./Message";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { usePendingMessages, pendingMessagesStore } from "../utils/pendingMessages";
+import { publishChatMessages } from "../utils/chatMessagesStore";
 
 const Messages = () => {
   const [messages, setMessages] = useState([]);
@@ -29,6 +30,10 @@ const Messages = () => {
     () => [...messages, ...activePending],
     [messages, activePending]
   );
+
+  useEffect(() => {
+    publishChatMessages(data.chatId, displayMessages);
+  }, [data.chatId, displayMessages]);
 
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
@@ -457,4 +462,4 @@ const Messages = () => {
   );
 };
 
-export default Messages;
+export default memo(Messages);

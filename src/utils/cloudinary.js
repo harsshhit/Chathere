@@ -1,56 +1,5 @@
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_IMAGE_DIMENSION = 1600;
-const COMPRESSION_THRESHOLD = 1024 * 1024;
-
-const loadImage = (file) => new Promise((resolve, reject) => {
-  const objectUrl = URL.createObjectURL(file);
-  const image = new Image();
-  image.onload = () => {
-    URL.revokeObjectURL(objectUrl);
-    resolve(image);
-  };
-  image.onerror = () => {
-    URL.revokeObjectURL(objectUrl);
-    reject(new Error("Could not read this image. Please choose another file."));
-  };
-  image.src = objectUrl;
-});
-
-const compressImage = async (file) => {
-  if (file.type === "image/gif") return file;
-
-  const image = await loadImage(file);
-  if (file.size <= COMPRESSION_THRESHOLD && image.width <= MAX_IMAGE_DIMENSION) return file;
-
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.width * scale));
-  canvas.height = Math.max(1, Math.round(image.height * scale));
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("Image compression is unavailable in this browser.");
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  let hasTransparency = false;
-  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let index = 3; index < pixels.length; index += 4) {
-    if (pixels[index] < 255) {
-      hasTransparency = true;
-      break;
-    }
-  }
-
-  const outputType = hasTransparency ? "image/png" : "image/jpeg";
-  const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (result) => result ? resolve(result) : reject(new Error("Could not compress this image.")),
-      outputType,
-      outputType === "image/jpeg" ? 0.8 : undefined
-    );
-  });
-  const extension = outputType === "image/png" ? ".png" : ".jpg";
-  const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
-  return new File([blob], `${baseName}${extension}`, { type: outputType, lastModified: Date.now() });
-};
+import { IMAGE_COMPRESSION } from "../config/uploadLimits";
+import { compressImage } from "./compressImage";
 
 export const uploadFile = async (file, { folder = "chathere", onProgress, signal } = {}) => {
   const cloudName = process.env.REACT_APP_CLOUDINARY_CLOUD_NAME;
@@ -108,6 +57,8 @@ export const uploadFile = async (file, { folder = "chathere", onProgress, signal
           resourceType: response.resource_type || resourceType,
           bytes: typeof response.bytes === "number" ? response.bytes : file.size,
           format: response.format || (file.name.includes(".") ? file.name.split(".").pop() : ""),
+          ...(typeof response.width === "number" ? { width: response.width } : {}),
+          ...(typeof response.height === "number" ? { height: response.height } : {}),
           ...(typeof response.duration === "number" ? { duration: response.duration } : {}),
         });
       } catch {
@@ -139,12 +90,12 @@ export const uploadImage = async (file, { folder = "chathere", onProgress } = {}
   if (!file || typeof file.type !== "string" || !file.type.startsWith("image/")) {
     throw new Error("Please choose an image file.");
   }
-  if (file.size > MAX_FILE_SIZE) {
+  const compressed = await compressImage(file, { maxDimension: IMAGE_COMPRESSION.AVATAR_MAX_DIMENSION });
+  if (compressed.file.size > 10 * 1024 * 1024) {
     throw new Error("Image must be 10 MB or smaller.");
   }
 
-  const uploadFileData = await compressImage(file);
-  const result = await uploadFile(uploadFileData, { folder, onProgress });
+  const result = await uploadFile(compressed.file, { folder, onProgress });
   return result.url;
 };
 

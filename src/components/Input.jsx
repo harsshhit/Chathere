@@ -34,7 +34,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import GifPicker from "./GifPicker";
 import { useTheme } from "../context/ThemeContext";
 import { pendingMessagesStore } from "../utils/pendingMessages";
-import { uploadImage, uploadFile } from "../utils/cloudinary";
+import { uploadFile } from "../utils/cloudinary";
 import {
   MAX_IMAGE_MB,
   MAX_VIDEO_MB,
@@ -43,6 +43,7 @@ import {
   MAX_FILES_PER_MESSAGE,
   BLOCKED_EXTENSIONS,
 } from "../config/uploadLimits";
+import { compressImage } from "../utils/compressImage";
 
 const formatBytes = (bytes = 0) => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
@@ -74,6 +75,29 @@ const getAttachmentLimit = (kind) => {
   }
 };
 
+const isHdCapableImage = (file) => {
+  const extension = file?.name?.split(".").pop()?.toLowerCase();
+  return file?.type?.startsWith("image/") && file.type !== "image/gif" && file.type !== "image/svg+xml" && !["gif", "svg"].includes(extension);
+};
+
+const getSizeError = (item, hd = item.hd) => {
+  const source = hd ? item.file : item.compressed?.file || item.file;
+  const limit = getAttachmentLimit("image");
+  if (!item.file?.type?.startsWith("image/") || source.size <= limit) return "";
+  return hd
+    ? `HD too large (${formatBytes(source.size)}, max ${formatBytes(limit)}), switch to standard`
+    : `Too large (${formatBytes(source.size)}, max ${formatBytes(limit)})`;
+};
+
+const getImageSizeLabel = (item) => {
+  if (!isHdCapableImage(item.file) || item.compressionSkipped || !item.compressed) return formatBytes(item.file.size);
+  if (item.hd) return `${formatBytes(item.file.size)} original`;
+  const savings = Math.max(0, Math.round((1 - item.compressed.compressedSize / item.file.size) * 100));
+  return savings > 0
+    ? `${formatBytes(item.compressed.compressedSize)} (was ${formatBytes(item.file.size)}, -${savings}%)`
+    : formatBytes(item.file.size);
+};
+
 const getBlockedStatus = (file) => {
   const name = file?.name || "";
   const extension = name.includes(".") ? name.split(".").pop()?.toLowerCase() : "";
@@ -81,6 +105,7 @@ const getBlockedStatus = (file) => {
     return { status: "blocked", message: `Blocked file type: .${extension}` };
   }
   const kind = getAttachmentKind(file);
+  if (kind === "image") return { status: "queued", message: "" };
   const maxBytes = getAttachmentLimit(kind);
   if (file.size > maxBytes) {
     const maxMB = (maxBytes / (1024 * 1024)).toFixed(kind === "file" ? 0 : 0);
@@ -115,11 +140,6 @@ const Input = () => {
   const [text, setText] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [imageUploadError, setImageUploadError] = useState("");
   const [attachmentQueue, dispatchAttachments] = useReducer(attachmentReducer, []);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -132,10 +152,15 @@ const Input = () => {
   const typingTimeoutRef = useRef(null);
   const imageInputRef = useRef(null);
   const draftsRef = useRef({});
+  const attachmentQueueRef = useRef(attachmentQueue);
+  const compressionQueueRef = useRef({ pending: [], active: 0 });
+  attachmentQueueRef.current = attachmentQueue;
 
   useEffect(() => () => {
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-  }, [imagePreviewUrl]);
+    attachmentQueueRef.current.forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+  }, []);
 
   useEffect(() => {
     if (!data.chatId) return;
@@ -205,6 +230,45 @@ const Input = () => {
     setText("");
   };
 
+  const drainCompressionQueue = useCallback(() => {
+    const queue = compressionQueueRef.current;
+    while (queue.active < 2 && queue.pending.length) {
+      const item = queue.pending.shift();
+      queue.active += 1;
+      compressImage(item.file).then((result) => {
+        const currentItem = attachmentQueueRef.current.find((entry) => entry.id === item.id) || item;
+        const compressed = result.skipped ? null : {
+          file: result.file,
+          width: result.width,
+          height: result.height,
+          originalSize: result.originalSize,
+          compressedSize: result.compressedSize,
+        };
+        const nextItem = { ...currentItem, compressed };
+        const error = getSizeError(nextItem, currentItem.hd);
+        dispatchAttachments({
+          type: "update",
+          id: item.id,
+          changes: {
+            compressed,
+            compressionSkipped: result.skipped,
+            status: error ? "error" : "queued",
+            error,
+            sizeError: Boolean(error),
+          },
+        });
+      }).finally(() => {
+        queue.active -= 1;
+        drainCompressionQueue();
+      });
+    }
+  }, []);
+
+  const scheduleImageCompression = useCallback((item) => {
+    compressionQueueRef.current.pending.push(item);
+    drainCompressionQueue();
+  }, [drainCompressionQueue]);
+
   const handleFilesAdded = useCallback((incomingFiles) => {
     const files = Array.from(incomingFiles || []).filter(Boolean);
     if (!files.length) return;
@@ -216,12 +280,17 @@ const Input = () => {
 
     const nextItems = usableFiles.map((file) => {
       const validation = getBlockedStatus(file);
-      const previewUrl = file.type?.startsWith("image/") ? URL.createObjectURL(file) : "";
+      const isImage = file.type?.startsWith("image/");
+      const previewUrl = isImage ? URL.createObjectURL(file) : "";
       return {
         id: uuid(),
         file,
         previewUrl,
-        status: validation.status,
+        status: isImage && validation.status !== "blocked" ? "compressing" : validation.status,
+        hd: false,
+        compressed: null,
+        compressionSkipped: false,
+        sizeError: false,
         progress: 0,
         error: validation.status === "error" ? validation.message : validation.status === "blocked" ? validation.message : "",
         retryable: false,
@@ -230,16 +299,46 @@ const Input = () => {
     });
 
     dispatchAttachments({ type: "add", items: nextItems });
-  }, [attachmentQueue.length]);
+    nextItems.filter((item) => item.status === "compressing").forEach(scheduleImageCompression);
+  }, [attachmentQueue.length, scheduleImageCompression]);
 
   const removeAttachment = (id) => {
     const item = attachmentQueue.find((entry) => entry.id === id);
     if (item?.controller) item.controller.abort();
+    if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
     dispatchAttachments({ type: "remove", id });
   };
 
+  const setAttachmentHd = (id, hd) => {
+    const item = attachmentQueueRef.current.find((entry) => entry.id === id);
+    if (!item || !isHdCapableImage(item.file) || item.status === "compressing") {
+      if (item && isHdCapableImage(item.file) && item.status === "compressing") {
+        dispatchAttachments({ type: "update", id, changes: { hd } });
+      }
+      return;
+    }
+    const nextItem = { ...item, hd };
+    const error = getSizeError(nextItem, hd);
+    dispatchAttachments({
+      type: "update",
+      id,
+      changes: {
+        hd,
+        status: item.sizeError ? (error ? "error" : "queued") : item.status,
+        error: item.sizeError ? error : item.error,
+        sizeError: Boolean(error),
+      },
+    });
+  };
+
+  const setAllImagesHd = (hd) => {
+    attachmentQueueRef.current
+      .filter((item) => isHdCapableImage(item.file))
+      .forEach((item) => setAttachmentHd(item.id, hd));
+  };
+
   const startAttachmentUpload = async (item) => {
-    if (!item || item.status === "blocked" || (item.status === "error" && !item.retryable)) return;
+    if (!item || item.status === "blocked" || item.status === "compressing" || item.sizeError || (item.status === "error" && !item.retryable)) return;
     const controller = new AbortController();
     dispatchAttachments({
       type: "update",
@@ -248,7 +347,8 @@ const Input = () => {
     });
 
     try {
-      const result = await uploadFile(item.file, {
+      const uploadSource = item.hd ? item.file : item.compressed?.file || item.file;
+      const result = await uploadFile(uploadSource, {
         folder: "chathere/chat",
         signal: controller.signal,
         onProgress: (progress) => {
@@ -464,6 +564,7 @@ const Input = () => {
     if (!data.chatId) return;
 
     if (attachmentQueue.length > 0) {
+      if (attachmentQueue.some((item) => item.status === "compressing")) return;
       const invalidItems = attachmentQueue.filter((item) => item.status === "blocked" || item.status === "error");
       if (invalidItems.length > 0) {
         return;
@@ -490,6 +591,8 @@ const Input = () => {
         const defaultText = mime.startsWith("image/") ? "📷 Photo" : `📎 ${file.name || "file"}`;
 
         if (file.type?.startsWith("image/")) {
+          const width = typeof result.width === "number" ? result.width : item.compressed?.width;
+          const height = typeof result.height === "number" ? result.height : item.compressed?.height;
           return {
             id: uuid(),
             text: caption || defaultText,
@@ -499,6 +602,9 @@ const Input = () => {
             senderPhoto: currentUser.photoURL,
             date: Timestamp.fromDate(new Date()),
             type: "image",
+            ...(typeof width === "number" ? { width } : {}),
+            ...(typeof height === "number" ? { height } : {}),
+            ...(item.hd ? { hd: true } : {}),
             ...getReplyPayload(),
           };
         }
@@ -573,6 +679,9 @@ const Input = () => {
       setReplyingTo(null);
       setEditingMessage(null);
       clearDraft();
+      attachmentQueue.forEach((item) => {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
       dispatchAttachments({ type: "clear" });
       stopTyping();
       inputRef.current?.focus();
@@ -774,85 +883,10 @@ const Input = () => {
     })();
   };
 
-  const sendUploadedImage = async (imageUrl) => {
-    if (!data.chatId) return;
-    const msgText = "📷 Photo";
-    const msgId = uuid();
-    const optimisticDate = new Date();
-    const optimisticMsg = {
-      id: msgId,
-      text: msgText,
-      img: imageUrl,
-      senderId: currentUser.uid,
-      senderName: currentUser.displayName,
-      senderPhoto: currentUser.photoURL,
-      date: optimisticDate,
-      status: "sending",
-      ...getReplyPayload(),
-    };
-    pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
-    setText("");
-    setReplyingTo(null);
-    stopTyping();
-
-    try {
-      const chatRef = doc(db, "chats", data.chatId);
-      const payload = {
-        id: msgId,
-        text: msgText,
-        img: imageUrl,
-        senderId: currentUser.uid,
-        senderName: currentUser.displayName,
-        senderPhoto: currentUser.photoURL,
-        date: Timestamp.fromDate(optimisticDate),
-        ...getReplyPayload(),
-      };
-      try {
-        await updateDoc(chatRef, { messages: arrayUnion(payload) });
-      } catch (updateErr) {
-        await setDoc(chatRef, { messages: [payload], typing: {}, lastRead: {} }, { merge: true });
-      }
-      await ensureChatDocAndUserChats(msgText);
-      const recipientUids = data.user?.isGroup
-        ? (data.user.members || []).map((member) => member.uid).filter((uid) => uid && uid !== currentUser.uid)
-        : data.user?.uid ? [data.user.uid] : [];
-      void notifyRecipients(recipientUids, msgText);
-    } catch (error) {
-      console.error("Error sending image message:", error);
-      pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
-    }
-  };
-
-  const uploadSelectedImage = async (file = selectedImage) => {
-    if (!file || !data.chatId || uploadingImage) return;
-    setUploadingImage(true);
-    setUploadProgress(0);
-    setImageUploadError("");
-    try {
-      const imageUrl = await uploadImage(file, {
-        folder: "chathere/chat",
-        onProgress: setUploadProgress,
-      });
-      await sendUploadedImage(imageUrl);
-      setSelectedImage(null);
-      setImagePreviewUrl("");
-      setUploadProgress(0);
-    } catch (error) {
-      setImageUploadError(error.message || "Image upload failed. Please retry.");
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
   const handleImageSelect = (event) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = "";
-    if (!file) return;
-    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    setSelectedImage(file);
-    setImagePreviewUrl(URL.createObjectURL(file));
-    setImageUploadError("");
-    void uploadSelectedImage(file);
+    handleFilesAdded(files);
   };
 
   const handleTextareaPaste = (event) => {
@@ -960,6 +994,11 @@ const Input = () => {
     }
   }, []);
 
+  const imageItems = attachmentQueue.filter((item) => item.file.type?.startsWith("image/"));
+  const hdCapableImageItems = imageItems.filter((item) => isHdCapableImage(item.file));
+  const allImagesHd = hdCapableImageItems.length > 0 && hdCapableImageItems.every((item) => item.hd);
+  const mixedImageHd = hdCapableImageItems.some((item) => item.hd) && !allImagesHd;
+
   return (
     <div
       className="px-3 py-3 sm:px-4 sm:py-3.5 safe-bottom"
@@ -1018,24 +1057,10 @@ const Input = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      {imagePreviewUrl && (
-        <div className="mb-2 flex items-center gap-3 rounded-xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}>
-          <div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg">
-            <img src={imagePreviewUrl} alt="Selected upload" className="h-full w-full object-cover" />
-            {uploadingImage && <div className="absolute inset-x-0 bottom-0 h-1 bg-black/25"><div className="h-full bg-indigo-500 transition-all" style={{ width: `${uploadProgress}%` }} /></div>}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium" style={{ color: "var(--text-primary)" }}>{uploadingImage ? `Uploading photo ${uploadProgress}%` : "Photo ready to retry"}</p>
-            {imageUploadError && <p role="alert" className="truncate text-[11px] text-red-500">{imageUploadError}</p>}
-          </div>
-          {imageUploadError && <button type="button" onClick={() => uploadSelectedImage()} disabled={uploadingImage} className="text-xs font-semibold text-indigo-500 disabled:opacity-50">Retry</button>}
-          <button type="button" onClick={() => { setSelectedImage(null); setImagePreviewUrl(""); setImageUploadError(""); }} disabled={uploadingImage} className="icon-btn" aria-label="Remove selected photo"><X size={15} /></button>
-        </div>
-      )}
       <div className="flex items-center gap-2">
         <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
-        <button type="button" onClick={() => imageInputRef.current?.click()} disabled={uploadingImage} className="icon-btn flex-shrink-0" aria-label="Send photo" title="Send photo" style={{ width: "42px", height: "42px", touchAction: "manipulation" }}>
-          {uploadingImage ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
+        <button type="button" onClick={() => imageInputRef.current?.click()} className="icon-btn flex-shrink-0" aria-label="Add photo" title="Add photo" style={{ width: "42px", height: "42px", touchAction: "manipulation" }}>
+          <ImageIcon size={18} />
         </button>
         <motion.button
           type="button"
@@ -1166,7 +1191,7 @@ const Input = () => {
               whileHover={canHover ? { scale: 1.05 } : undefined}
               whileTap={{ scale: 0.95 }}
               onClick={handleSend}
-              disabled={uploadingImage || attachmentQueue.some((item) => item.status === "uploading")}
+              disabled={attachmentQueue.some((item) => item.status === "compressing" || item.status === "uploading")}
               className="send-btn flex-shrink-0"
               id="chat-send-btn"
               aria-label="Send message"
@@ -1182,11 +1207,40 @@ const Input = () => {
         <div className="mt-3 space-y-2">
           {attachmentQueue.length === 1 && attachmentQueue[0]?.file?.type?.startsWith("image/") && attachmentQueue[0].status !== "blocked" && (
             <div className="rounded-2xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}>
-              <img src={attachmentQueue[0].previewUrl || attachmentQueue[0].result?.url} alt="Attachment preview" className="h-36 w-full rounded-xl object-cover" />
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <button type="button" onClick={() => removeAttachment(attachmentQueue[0].id)} className="text-xs font-semibold text-red-400">Remove</button>
-                <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "uploading"} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Send</button>
+              <div className="relative">
+                <img src={attachmentQueue[0].previewUrl || attachmentQueue[0].result?.url} alt="Attachment preview" className="h-36 w-full rounded-xl object-cover" />
+                {attachmentQueue[0].status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={22} className="animate-spin text-white" aria-label="Compressing image" /></div>}
               </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium" style={{ color: "var(--text-primary)" }}>{attachmentQueue[0].file.name || "Image"}</p>
+                  <p className={`text-[11px] ${!attachmentQueue[0].hd && attachmentQueue[0].compressed && !attachmentQueue[0].compressionSkipped ? "text-emerald-500" : "text-[var(--text-secondary)]"}`}>
+                    {getImageSizeLabel(attachmentQueue[0])}
+                  </p>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  {isHdCapableImage(attachmentQueue[0].file) && (
+                    <button type="button" onClick={() => setAttachmentHd(attachmentQueue[0].id, !attachmentQueue[0].hd)} aria-pressed={attachmentQueue[0].hd} title="Send original quality (uses more storage)" className={`rounded-md border px-2 py-1 text-[10px] font-bold ${attachmentQueue[0].hd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                  )}
+                  <button type="button" onClick={() => removeAttachment(attachmentQueue[0].id)} className="text-xs font-semibold text-red-400">Remove</button>
+                  <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "compressing" || attachmentQueue[0].status === "uploading" || attachmentQueue[0].status === "error"} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Send</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {imageItems.length >= 2 && (
+            <div className="flex items-center justify-between gap-3 px-1">
+              <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Attachments</span>
+              <button
+                type="button"
+                onClick={() => setAllImagesHd(!allImagesHd)}
+                aria-pressed={mixedImageHd ? "mixed" : allImagesHd}
+                title="Send original quality (uses more storage)"
+                className={`rounded-md border px-2 py-1 text-[10px] font-bold ${allImagesHd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}
+              >
+                HD all{mixedImageHd ? " ·" : ""}
+              </button>
             </div>
           )}
 
@@ -1207,7 +1261,10 @@ const Input = () => {
                   <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
                       <span className="rounded-lg p-1.5" style={{ background: "rgba(99,102,241,0.12)", color: "var(--primary-light)" }}>{icon}</span>
-                      <span className="truncate max-w-[100px]">{item.file.name || "Attachment"}</span>
+                      <div className="min-w-0">
+                        <span className="block truncate max-w-[100px]">{item.file.name || "Attachment"}</span>
+                        {item.file.type?.startsWith("image/") && <span className={`block text-[10px] font-normal ${!item.hd && item.compressed && !item.compressionSkipped ? "text-emerald-500" : "text-[var(--text-secondary)]"}`}>{getImageSizeLabel(item)}</span>}
+                      </div>
                     </div>
                     <button type="button" onClick={() => removeAttachment(item.id)} className="icon-btn" aria-label="Remove attachment">
                       <X size={14} />
@@ -1215,14 +1272,21 @@ const Input = () => {
                   </div>
 
                   {hasPreview ? (
-                    <img src={item.previewUrl || item.result?.url} alt={item.file.name || "Attachment preview"} className="h-20 w-full rounded-xl object-cover" />
+                    <div className="relative">
+                      <img src={item.previewUrl || item.result?.url} alt={item.file.name || "Attachment preview"} className="h-20 w-full rounded-xl object-cover" />
+                      {item.status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={16} className="animate-spin text-white" aria-label="Compressing image" /></div>}
+                    </div>
                   ) : (
                     <div className="flex h-20 w-full items-center justify-center rounded-xl text-[var(--text-muted)]" style={{ background: "rgba(99,102,241,0.08)" }}>
                       {icon}
                     </div>
                   )}
 
-                  <div className="mt-2 text-[10px] text-[var(--text-secondary)]">{formatBytes(item.file.size)}</div>
+                  {!item.file.type?.startsWith("image/") && <div className="mt-2 text-[10px] text-[var(--text-secondary)]">{formatBytes(item.file.size)}</div>}
+
+                  {isHdCapableImage(item.file) && (
+                    <button type="button" onClick={() => setAttachmentHd(item.id, !item.hd)} aria-pressed={item.hd} title="Send original quality (uses more storage)" className={`mt-2 rounded-md border px-2 py-1 text-[10px] font-bold ${item.hd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                  )}
 
                   {item.status === "uploading" && (
                     <div className="mt-2 flex items-center gap-2">

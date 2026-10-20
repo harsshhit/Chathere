@@ -5,6 +5,9 @@ import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 export const ChatContext = createContext();
+export const ContactPanelContext = createContext({});
+export const ContactPanelActionsContext = createContext({});
+export const UserChatsContext = createContext({});
 
 export const ChatContextProvider = ({ children }) => {
   const { currentUser } = useContext(AuthContext);
@@ -19,19 +22,23 @@ export const ChatContextProvider = ({ children }) => {
   const [chatNotFound, setChatNotFound] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [contactPanel, setContactPanel] = useState({ open: false, userId: null, user: null, history: [] });
 
   useEffect(() => {
     setReplyingTo(null);
     setEditingMessage(null);
+    setContactPanel({ open: false, userId: null, user: null, history: [] });
   }, [urlChatId]);
 
   const userChatsRef = useRef({});
+  const [userChatsSnapshot, setUserChatsSnapshot] = useState({});
   const [userChatsLoaded, setUserChatsLoaded] = useState(false);
 
   // Subscribe to the current user's userChats collection
   useEffect(() => {
     if (!currentUser?.uid) {
       userChatsRef.current = {};
+      setUserChatsSnapshot({});
       setUserChatsLoaded(true);
       return;
     }
@@ -44,6 +51,7 @@ export const ChatContextProvider = ({ children }) => {
         } else {
           userChatsRef.current = {};
         }
+        setUserChatsSnapshot(userChatsRef.current);
         setUserChatsLoaded(true);
       },
       (err) => {
@@ -201,6 +209,33 @@ export const ChatContextProvider = ({ children }) => {
     }
   }, []);
 
+  const openContactPanel = useCallback((user) => {
+    if (!user?.uid) return;
+    setContactPanel({ open: true, userId: user.uid, user, history: [] });
+  }, []);
+
+  const openContactPanelUser = useCallback((user) => {
+    if (!user?.uid) return;
+    setContactPanel((current) => ({
+      open: true,
+      userId: user.uid,
+      user,
+      history: current.open && current.user ? [...current.history, current.user] : [],
+    }));
+  }, []);
+
+  const backContactPanel = useCallback(() => {
+    setContactPanel((current) => {
+      const previous = current.history[current.history.length - 1];
+      if (!previous) return { open: false, userId: null, user: null, history: [] };
+      return { open: true, userId: previous.uid, user: previous, history: current.history.slice(0, -1) };
+    });
+  }, []);
+
+  const closeContactPanel = useCallback(() => {
+    setContactPanel({ open: false, userId: null, user: null, history: [] });
+  }, []);
+
   const value = useMemo(
     () => ({
       data: {
@@ -218,9 +253,23 @@ export const ChatContextProvider = ({ children }) => {
     [urlChatId, activeUser, loadingChat, chatNotFound, replyingTo, editingMessage, dispatch]
   );
 
+  const panelValue = useMemo(() => ({ contactPanel }), [contactPanel]);
+  const panelActions = useMemo(() => ({
+    openContactPanel,
+    openContactPanelUser,
+    backContactPanel,
+    closeContactPanel,
+  }), [openContactPanel, openContactPanelUser, backContactPanel, closeContactPanel]);
+
   return (
     <ChatContext.Provider value={value}>
-      {children}
+      <UserChatsContext.Provider value={userChatsSnapshot}>
+        <ContactPanelContext.Provider value={panelValue}>
+          <ContactPanelActionsContext.Provider value={panelActions}>
+            {children}
+          </ContactPanelActionsContext.Provider>
+        </ContactPanelContext.Provider>
+      </UserChatsContext.Provider>
     </ChatContext.Provider>
   );
 };

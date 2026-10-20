@@ -417,7 +417,7 @@ const Profile = ({ settings = false }) => {
                         onChange={(e) => setNewBio(e.target.value)}
                         placeholder="Write something about yourself…"
                         rows={3}
-                        maxLength={160}
+                        maxLength={140}
                         className="w-full px-3 py-2 text-sm rounded-xl outline-none resize-none"
                         style={{
                           background: "var(--surface-3)",
@@ -445,6 +445,7 @@ const Profile = ({ settings = false }) => {
                           Cancel
                         </button>
                       </div>
+                      <p className="text-right text-[11px] text-[var(--text-muted)]" aria-live="polite">{newBio.length}/140</p>
                     </motion.div>
                   ) : (
                     <motion.div

@@ -1,8 +1,8 @@
 import React, { useContext, useRef, useState, useEffect, memo } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext } from "../context/ChatContext";
-import { Download, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile, FileText, Music4, Video } from "lucide-react";
+import { ChatContext, ContactPanelActionsContext } from "../context/ChatContext";
+import { Download, ExternalLink, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile, FileText, Music4, Video } from "lucide-react";
 import { deleteField, doc, FieldPath, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import Avatar from "./Avatar";
@@ -52,6 +52,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   const [savingEdit, setSavingEdit] = useState(false);
   const { currentUser } = useContext(AuthContext);
   const { data, setReplyingTo, setEditingMessage } = useContext(ChatContext);
+  const { openContactPanelUser: openMemberPanel } = useContext(ContactPanelActionsContext);
   const ref = useRef();
   const reactionPickerRef = useRef(null);
   const longPressTimerRef = useRef(null);
@@ -100,6 +101,11 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   }, [isLive, isLoveMessage, message.date, message.id, shouldReduceMotion]);
 
   const isOwn = message.senderId === currentUser.uid;
+  const senderMember = data.user?.members?.find((member) => member.uid === message.senderId) || {
+    uid: message.senderId,
+    displayName: message.senderName,
+    photoURL: message.senderPhoto,
+  };
 
   const handleReply = () => {
     if (!message.id) return;
@@ -283,6 +289,11 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
     }
   };
 
+  const handleOpenOriginal = (e) => {
+    e.stopPropagation();
+    window.open(message.img, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <motion.div
       ref={ref}
@@ -292,18 +303,29 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
       transition={{ duration: 0.2, ease: "easeOut" }}
       className={`flex items-end gap-2.5 mb-3 group relative ${isOwn ? "flex-row-reverse" : "flex-row"}`}
     >
-      <Avatar
-        src={isOwn ? currentUser.photoURL : (message.senderPhoto || data.user.photoURL)}
-        alt={isOwn ? currentUser.displayName : (message.senderName || data.user.displayName)}
-        className="w-7 h-7 rounded-full object-cover flex-shrink-0 mb-1"
-        style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
-      />
+      {data.user?.isGroup ? (
+        <button type="button" onClick={() => openMemberPanel(senderMember)} className="mb-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Open ${senderMember.displayName || "sender"} information`}>
+          <Avatar
+            src={isOwn ? currentUser.photoURL : (message.senderPhoto || senderMember.photoURL || data.user.photoURL)}
+            alt={isOwn ? currentUser.displayName : (message.senderName || data.user.displayName)}
+            className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+            style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+          />
+        </button>
+      ) : (
+        <Avatar
+          src={isOwn ? currentUser.photoURL : (message.senderPhoto || data.user.photoURL)}
+          alt={isOwn ? currentUser.displayName : (message.senderName || data.user.displayName)}
+          className="w-7 h-7 rounded-full object-cover flex-shrink-0 mb-1"
+          style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+        />
+      )}
 
       <div className={`flex flex-col gap-1.5 max-w-[72%] sm:max-w-[65%] ${isOwn ? "items-end" : "items-start"}`}>
-        {!isOwn && data.user?.isGroup && (
-          <span className="text-[10px] text-[var(--text-secondary)] font-medium pl-1">
-            {message.senderName || "Unknown"}
-          </span>
+        {data.user?.isGroup && (
+          <button type="button" onClick={() => openMemberPanel(senderMember)} className="self-start pl-1 text-[10px] font-medium text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+            {message.senderName || (isOwn ? currentUser.displayName : "Unknown")}
+          </button>
         )}
 
         <div className="relative w-full">
@@ -406,8 +428,10 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
               </div>
             )}
             <img
-              src={isExpanded ? message.img : optimizeUrl(message.img, 400)}
+              src={optimizeUrl(message.img, isExpanded ? 1600 : 800)}
               alt="attachment"
+              width={typeof message.width === "number" ? message.width : undefined}
+              height={typeof message.height === "number" ? message.height : undefined}
               className={`rounded-2xl object-cover transition-all duration-300 ${
                 isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
               }`}
@@ -430,6 +454,9 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                 size={22}
                 className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               />
+              {message.hd === true && (
+                <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow">HD</span>
+              )}
             </div>
 
             <span
@@ -452,22 +479,33 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
             </span>
 
             {isExpanded && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.15 }}
-                onClick={handleDownload}
-                disabled={isDownloading}
-                className="absolute bottom-3 left-3 p-2.5 rounded-xl transition-all duration-200 disabled:opacity-50"
-                style={{
-                  background: "rgba(0,0,0,0.6)",
-                  backdropFilter: "blur(8px)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "white",
-                }}
-              >
-                <Download size={16} className={isDownloading ? "animate-pulse" : ""} />
-              </motion.button>
+              <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.15 }}
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="p-2.5 rounded-xl transition-all duration-200 disabled:opacity-50"
+                  style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                  title="Download original"
+                  aria-label="Download original image"
+                >
+                  <Download size={16} className={isDownloading ? "animate-pulse" : ""} />
+                </motion.button>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 }}
+                  onClick={handleOpenOriginal}
+                  className="p-2.5 rounded-xl transition-all duration-200"
+                  style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
+                  title="Open original"
+                  aria-label="Open original image"
+                >
+                  <ExternalLink size={16} />
+                </motion.button>
+              </div>
             )}
           </motion.div>
         )}
@@ -645,6 +683,9 @@ const areMessagePropsEqual = (previous, next) => {
   return previousMessage.id === nextMessage.id &&
     previousMessage.text === nextMessage.text &&
     previousMessage.img === nextMessage.img &&
+    previousMessage.width === nextMessage.width &&
+    previousMessage.height === nextMessage.height &&
+    previousMessage.hd === nextMessage.hd &&
     previousMessage.type === nextMessage.type &&
     previousMessage.senderId === nextMessage.senderId &&
     previousMessage.senderName === nextMessage.senderName &&
