@@ -10,9 +10,11 @@ import {
   FileText,
   Video,
   Music4,
+  Film,
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
+  Plus,
 } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext } from "../context/ChatContext";
@@ -140,6 +142,7 @@ const Input = () => {
   const [text, setText] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
+  const [showQuickActions, setShowQuickActions] = useState(false);
   const [attachmentQueue, dispatchAttachments] = useReducer(attachmentReducer, []);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -147,6 +150,7 @@ const Input = () => {
   const { data, replyingTo, setReplyingTo, editingMessage, setEditingMessage } = useContext(ChatContext);
   const { theme } = useTheme();
   const pickerRef = useRef(null);
+  const quickActionsRef = useRef(null);
   const inputRef = useRef(null);
   const queueInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -387,6 +391,9 @@ const Input = () => {
       if (pickerRef.current && !pickerRef.current.contains(event.target)) {
         setShowEmojiPicker(false);
         setShowGifPicker(false);
+      }
+      if (quickActionsRef.current && !quickActionsRef.current.contains(event.target)) {
+        setShowQuickActions(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -999,13 +1006,13 @@ const Input = () => {
   const allImagesHd = hdCapableImageItems.length > 0 && hdCapableImageItems.every((item) => item.hd);
   const mixedImageHd = hdCapableImageItems.some((item) => item.hd) && !allImagesHd;
 
+  useEffect(() => {
+    if (text.trim() || attachmentQueue.length > 0) setShowQuickActions(false);
+  }, [attachmentQueue.length, text]);
+
   return (
     <div
-      className="px-3 py-3 sm:px-4 sm:py-3.5 safe-bottom"
-      style={{
-        background: "var(--surface-2)",
-        paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
-      }}
+      className="chat-composer-shell"
     >
       <AnimatePresence>
         {(replyingTo || editingMessage) && (
@@ -1016,18 +1023,12 @@ const Input = () => {
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div
-              className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2"
-              style={{
-                background: "var(--surface-3)",
-                borderLeft: `3px solid ${editingMessage ? "rgba(99,102,241,0.9)" : "var(--primary-light)"}`,
-              }}
-            >
+            <div className={`glass mb-2 flex items-center gap-2 rounded-2xl px-3 py-2 ${editingMessage ? "composer-context-edit" : "composer-context-reply"}`}>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold truncate" style={{ color: "var(--primary-light)" }}>
+                <p className="truncate text-xs font-semibold text-[var(--primary-text)]">
                   {editingMessage ? "Editing message" : `Replying to ${replyingTo?.senderName || "User"}`}
                 </p>
-                <p className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
+                <p className="truncate text-xs text-[var(--text-secondary)]">
                   {editingMessage
                     ? editingMessage.text || "Message"
                     : replyingTo?.type === "image"
@@ -1048,7 +1049,7 @@ const Input = () => {
                   }
                   setReplyingTo(null);
                 }}
-                className="icon-btn flex-shrink-0 focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="icon-btn flex-shrink-0 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                 aria-label={editingMessage ? "Cancel edit" : "Cancel reply"}
               >
                 <X size={16} />
@@ -1057,62 +1058,42 @@ const Input = () => {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="flex items-center gap-2">
+      <div className="flex items-end gap-2">
         <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
-        <button type="button" onClick={() => imageInputRef.current?.click()} className="icon-btn flex-shrink-0" aria-label="Add photo" title="Add photo" style={{ width: "42px", height: "42px", touchAction: "manipulation" }}>
-          <ImageIcon size={18} />
-        </button>
-        <motion.button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onPointerDown={(e) => e.preventDefault()}
-          whileHover={canHover ? { scale: 1.05 } : undefined}
-          whileTap={{ scale: 0.95 }}
-          onClick={() => { setShowGifPicker(!showGifPicker); setShowEmojiPicker(false); }}
-          className="icon-btn flex-shrink-0 cursor-pointer font-bold tracking-widest text-[11px]"
-          title="Send GIF"
-          style={{
-            width: "42px",
-            height: "42px",
-            color: showGifPicker ? "var(--primary-light)" : "var(--text-muted)",
-            touchAction: "manipulation",
-          }}
-        >
-          GIF
-        </motion.button>
 
-        <div className="relative flex-1 min-w-0">
+        <div ref={pickerRef} className="composer-pill glass glass-pill relative flex min-h-12 min-w-0 flex-1 items-end gap-1.5 px-2 py-1.5">
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
             onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
-            className="absolute left-4 top-1/2 -translate-y-1/2 z-10 transition-colors duration-200"
-            style={{ color: showEmojiPicker ? "var(--primary-light)" : "var(--text-muted)" }}
-            aria-label="Emoji picker"
+            className={`icon-btn-glass h-9 w-9 flex-shrink-0 border-0 bg-transparent ${showEmojiPicker ? "text-[var(--primary-text)]" : ""}`}
+            aria-label="Emoji and sticker picker"
+            title="Emoji and sticker picker"
           >
-            <Smile size={18} />
+            <Smile size={19} />
           </button>
 
+          <div className="relative flex min-w-0 flex-1 items-end">
           <AnimatePresence>
             {(showEmojiPicker || showGifPicker) && (
               <motion.div
-                ref={pickerRef}
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
-                className="absolute bottom-full left-0 mb-2 z-50"
-                style={{ boxShadow: "0 20px 60px var(--shadow)" }}
+                className="glass absolute bottom-full left-0 z-50 mb-2 overflow-hidden p-1"
               >
                 {showEmojiPicker ? (
-                  <EmojiPicker
-                    onEmojiClick={onEmojiClick}
-                    width={300}
-                    height={380}
-                    theme={theme === "dark" ? "dark" : "light"}
-                    lazyLoadEmojis
-                  />
+                  <div className="emoji-picker-ember">
+                    <EmojiPicker
+                      onEmojiClick={onEmojiClick}
+                      width={300}
+                      height={380}
+                      theme={theme === "dark" ? "dark" : "light"}
+                      lazyLoadEmojis
+                    />
+                  </div>
                 ) : (
                   <GifPicker onGifSelect={handleGifSend} />
                 )}
@@ -1123,20 +1104,30 @@ const Input = () => {
           <textarea
             ref={inputRef}
             rows={1}
-            placeholder="Message…"
+            placeholder="Type here"
             value={text}
             onChange={handleTyping}
             onKeyDown={handleKeyDown}
             onPaste={handleTextareaPaste}
-            className="chat-input !pl-11 w-full resize-none"
+            className="chat-input composer-textarea w-full resize-none"
             id="chat-message-input"
             aria-label="Message input"
             style={{
-              minHeight: "44px",
+              minHeight: "36px",
               maxHeight: "160px",
               overflowY: text && inputRef.current && inputRef.current.scrollHeight > 160 ? "auto" : "hidden",
             }}
           />
+          </div>
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className="icon-btn-glass h-9 w-9 flex-shrink-0 border-0 bg-transparent"
+            aria-label="Add photo"
+            title="Add photo"
+          >
+            <ImageIcon size={18} />
+          </button>
         </div>
 
         <input
@@ -1151,36 +1142,49 @@ const Input = () => {
           aria-label="Attach files"
         />
 
-        <button
-          type="button"
-          onClick={() => queueInputRef.current?.click()}
-          className="icon-btn flex-shrink-0"
-          aria-label="Attach files"
-          title="Attach files"
-          style={{ width: "42px", height: "42px", touchAction: "manipulation" }}
-        >
-          <Paperclip size={18} />
-        </button>
-
         <AnimatePresence initial={false} mode="wait">
           {!text.trim() && attachmentQueue.length === 0 ? (
-            <motion.button
-              key="mic"
-              type="button"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.95 }}
-              disabled
-              className="send-btn flex-shrink-0 opacity-70"
-              id="chat-mic-btn"
-              aria-label="Voice messages coming soon"
-              title="Voice messages coming soon"
-              style={{ touchAction: "manipulation" }}
-            >
-              <Mic size={18} className="ml-0.5" />
-            </motion.button>
+            <div className="relative flex-shrink-0" ref={quickActionsRef}>
+              <motion.button
+                key="quick-actions"
+                type="button"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={() => setShowQuickActions((open) => !open)}
+                className="fab h-12 w-12"
+                id="chat-quick-actions"
+                aria-label="More message actions"
+                aria-expanded={showQuickActions}
+                aria-haspopup="menu"
+              >
+                <Plus size={21} />
+              </motion.button>
+              <AnimatePresence>
+                {showQuickActions && (
+                  <motion.div
+                    role="menu"
+                    aria-label="Message actions"
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 30 }}
+                    className="glass quick-action-menu absolute bottom-full right-0 z-50 mb-2 w-48 p-1.5"
+                  >
+                    <button type="button" role="menuitem" className="quick-action-row" onClick={() => { setShowQuickActions(false); queueInputRef.current?.click(); }}>
+                      <Paperclip size={16} /> File
+                    </button>
+                    <button type="button" role="menuitem" className="quick-action-row" onClick={() => { setShowQuickActions(false); setShowEmojiPicker(false); setShowGifPicker(true); }}>
+                      <Film size={16} /> GIF / Sticker
+                    </button>
+                    <button type="button" role="menuitem" disabled className="quick-action-row is-disabled" title="Voice messages are not available yet">
+                      <Mic size={16} /> Voice message <span className="ml-auto text-[10px]">Soon</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           ) : (
             <motion.button
               key="send"
@@ -1192,7 +1196,7 @@ const Input = () => {
               whileTap={{ scale: 0.95 }}
               onClick={handleSend}
               disabled={attachmentQueue.some((item) => item.status === "compressing" || item.status === "uploading")}
-              className="send-btn flex-shrink-0"
+              className="send-btn h-12 w-12 flex-shrink-0 rounded-full"
               id="chat-send-btn"
               aria-label="Send message"
               style={{ touchAction: "manipulation" }}
@@ -1206,7 +1210,7 @@ const Input = () => {
       {attachmentQueue.length > 0 && (
         <div className="mt-3 space-y-2">
           {attachmentQueue.length === 1 && attachmentQueue[0]?.file?.type?.startsWith("image/") && attachmentQueue[0].status !== "blocked" && (
-            <div className="rounded-2xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}>
+            <div className="glass rounded-2xl p-2">
               <div className="relative">
                 <img src={attachmentQueue[0].previewUrl || attachmentQueue[0].result?.url} alt="Attachment preview" className="h-36 w-full rounded-xl object-cover" />
                 {attachmentQueue[0].status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={22} className="animate-spin text-white" aria-label="Compressing image" /></div>}
@@ -1214,16 +1218,16 @@ const Input = () => {
               <div className="mt-2 flex items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium" style={{ color: "var(--text-primary)" }}>{attachmentQueue[0].file.name || "Image"}</p>
-                  <p className={`text-[11px] ${!attachmentQueue[0].hd && attachmentQueue[0].compressed && !attachmentQueue[0].compressionSkipped ? "text-emerald-500" : "text-[var(--text-secondary)]"}`}>
+                  <p className={`text-[11px] ${!attachmentQueue[0].hd && attachmentQueue[0].compressed && !attachmentQueue[0].compressionSkipped ? "text-[var(--success-text)]" : "text-[var(--text-secondary)]"}`}>
                     {getImageSizeLabel(attachmentQueue[0])}
                   </p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
                   {isHdCapableImage(attachmentQueue[0].file) && (
-                    <button type="button" onClick={() => setAttachmentHd(attachmentQueue[0].id, !attachmentQueue[0].hd)} aria-pressed={attachmentQueue[0].hd} title="Send original quality (uses more storage)" className={`rounded-md border px-2 py-1 text-[10px] font-bold ${attachmentQueue[0].hd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                    <button type="button" onClick={() => setAttachmentHd(attachmentQueue[0].id, !attachmentQueue[0].hd)} aria-pressed={attachmentQueue[0].hd} title="Send original quality (uses more storage)" className={`rounded-md border px-2 py-1 text-[10px] font-bold ${attachmentQueue[0].hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
                   )}
-                  <button type="button" onClick={() => removeAttachment(attachmentQueue[0].id)} className="text-xs font-semibold text-red-400">Remove</button>
-                  <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "compressing" || attachmentQueue[0].status === "uploading" || attachmentQueue[0].status === "error"} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Send</button>
+                  <button type="button" onClick={() => removeAttachment(attachmentQueue[0].id)} className="text-xs font-semibold text-[var(--danger-text)]">Remove</button>
+                  <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "compressing" || attachmentQueue[0].status === "uploading" || attachmentQueue[0].status === "error"} className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Send</button>
                 </div>
               </div>
             </div>
@@ -1237,7 +1241,7 @@ const Input = () => {
                 onClick={() => setAllImagesHd(!allImagesHd)}
                 aria-pressed={mixedImageHd ? "mixed" : allImagesHd}
                 title="Send original quality (uses more storage)"
-                className={`rounded-md border px-2 py-1 text-[10px] font-bold ${allImagesHd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}
+                className={`rounded-md border px-2 py-1 text-[10px] font-bold ${allImagesHd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}
               >
                 HD all{mixedImageHd ? " ·" : ""}
               </button>
@@ -1257,13 +1261,13 @@ const Input = () => {
               const hasPreview = item.file.type?.startsWith("image/") && (item.previewUrl || item.result?.url);
 
               return (
-                <div key={item.id} className="min-w-[150px] max-w-[180px] flex-1 rounded-2xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}>
+                <div key={item.id} className="glass min-w-[150px] max-w-[180px] flex-1 rounded-2xl p-2">
                   <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
-                      <span className="rounded-lg p-1.5" style={{ background: "rgba(99,102,241,0.12)", color: "var(--primary-light)" }}>{icon}</span>
+                      <span className="rounded-lg p-1.5" style={{ background: "var(--primary-soft)", color: "var(--primary-light)" }}>{icon}</span>
                       <div className="min-w-0">
                         <span className="block truncate max-w-[100px]">{item.file.name || "Attachment"}</span>
-                        {item.file.type?.startsWith("image/") && <span className={`block text-[10px] font-normal ${!item.hd && item.compressed && !item.compressionSkipped ? "text-emerald-500" : "text-[var(--text-secondary)]"}`}>{getImageSizeLabel(item)}</span>}
+                        {item.file.type?.startsWith("image/") && <span className={`block text-[10px] font-normal ${!item.hd && item.compressed && !item.compressionSkipped ? "text-[var(--success-text)]" : "text-[var(--text-secondary)]"}`}>{getImageSizeLabel(item)}</span>}
                       </div>
                     </div>
                     <button type="button" onClick={() => removeAttachment(item.id)} className="icon-btn" aria-label="Remove attachment">
@@ -1277,7 +1281,7 @@ const Input = () => {
                       {item.status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={16} className="animate-spin text-white" aria-label="Compressing image" /></div>}
                     </div>
                   ) : (
-                    <div className="flex h-20 w-full items-center justify-center rounded-xl text-[var(--text-muted)]" style={{ background: "rgba(99,102,241,0.08)" }}>
+                    <div className="flex h-20 w-full items-center justify-center rounded-xl text-[var(--text-muted)]" style={{ background: "var(--primary-soft)" }}>
                       {icon}
                     </div>
                   )}
@@ -1285,7 +1289,7 @@ const Input = () => {
                   {!item.file.type?.startsWith("image/") && <div className="mt-2 text-[10px] text-[var(--text-secondary)]">{formatBytes(item.file.size)}</div>}
 
                   {isHdCapableImage(item.file) && (
-                    <button type="button" onClick={() => setAttachmentHd(item.id, !item.hd)} aria-pressed={item.hd} title="Send original quality (uses more storage)" className={`mt-2 rounded-md border px-2 py-1 text-[10px] font-bold ${item.hd ? "border-indigo-500 bg-indigo-600 text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                    <button type="button" onClick={() => setAttachmentHd(item.id, !item.hd)} aria-pressed={item.hd} title="Send original quality (uses more storage)" className={`mt-2 rounded-md border px-2 py-1 text-[10px] font-bold ${item.hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
                   )}
 
                   {item.status === "uploading" && (
@@ -1295,24 +1299,24 @@ const Input = () => {
                         <span className="absolute inset-0 flex items-center justify-center text-[9px]">{item.progress || 0}%</span>
                       </div>
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
-                        <div className="h-full rounded-full bg-indigo-500" style={{ width: `${item.progress || 0}%` }} />
+                        <div className="h-full rounded-full bg-[var(--primary)]" style={{ width: `${item.progress || 0}%` }} />
                       </div>
                     </div>
                   )}
 
                   {item.status === "error" && (
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1 text-[10px] text-red-400"><AlertTriangle size={12} />{item.error || "Upload failed"}</div>
-                      {item.retryable && <button type="button" onClick={() => startAttachmentUpload(item)} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white"><RefreshCw size={11} />Retry</button>}
+                      <div className="flex items-center gap-1 text-[10px] text-[var(--danger-text)]"><AlertTriangle size={12} />{item.error || "Upload failed"}</div>
+                      {item.retryable && <button type="button" onClick={() => startAttachmentUpload(item)} className="inline-flex items-center gap-1 rounded-lg bg-[var(--primary)] px-2 py-1 text-[10px] font-semibold text-white"><RefreshCw size={11} />Retry</button>}
                     </div>
                   )}
 
                   {item.status === "done" && (
-                    <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-400"><CheckCircle2 size={12} />Uploaded</div>
+                    <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--success-text)]"><CheckCircle2 size={12} />Uploaded</div>
                   )}
 
                   {item.status === "blocked" && (
-                    <div className="mt-2 flex items-center gap-1 text-[10px] text-amber-400"><AlertTriangle size={12} />{item.error}</div>
+                    <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--warning-text)]"><AlertTriangle size={12} />{item.error}</div>
                   )}
                 </div>
               );
@@ -1322,8 +1326,8 @@ const Input = () => {
       )}
 
       {isDragOver && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center border-2 border-dashed border-indigo-400 bg-indigo-500/10" style={{ backdropFilter: "blur(2px)" }}>
-          <div className="rounded-2xl border border-indigo-400/60 bg-[var(--surface)] px-6 py-4 text-sm font-semibold text-[var(--text-primary)] shadow-lg">Drop files to attach</div>
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center border-2 border-dashed border-[var(--primary-border)] bg-[var(--primary-soft)]">
+          <div className="glass rounded-2xl px-6 py-4 text-sm font-semibold text-[var(--text-primary)] shadow-lg">Drop files to attach</div>
         </div>
       )}
     </div>

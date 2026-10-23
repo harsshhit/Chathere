@@ -96,7 +96,7 @@ const Login = () => {
       <div
         className="pointer-events-none fixed top-0 right-0 w-[520px] h-[520px] rounded-full opacity-20"
         style={{
-          background: "radial-gradient(circle, #6366f1 0%, transparent 70%)",
+          background: "radial-gradient(circle, var(--primary-soft) 0%, transparent 70%)",
           filter: "blur(60px)",
           transform: "translate(40%, -40%)",
         }}
@@ -104,7 +104,7 @@ const Login = () => {
       <div
         className="pointer-events-none fixed bottom-0 left-0 w-[400px] h-[400px] rounded-full opacity-15"
         style={{
-          background: "radial-gradient(circle, #a78bfa 0%, transparent 70%)",
+          background: "radial-gradient(circle, var(--primary-glow) 0%, transparent 70%)",
           filter: "blur(60px)",
           transform: "translate(-30%, 30%)",
         }}
@@ -180,7 +180,7 @@ const Login = () => {
               <motion.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 text-xs text-red-400 px-1"
+                className="flex items-center gap-2 text-xs text-[var(--danger-text)] px-1"
               >
                 <AlertCircle size={14} className="flex-shrink-0" />
                 <span>{errMsg}</span>

@@ -172,7 +172,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
     <AnimatePresence>
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
-        style={{ background: "var(--overlay)", backdropFilter: "blur(8px)" }}
+        style={{ background: "var(--overlay)", backdropFilter: "blur(var(--blur-lg))" }}
         onClick={() => !isSaving && onClose()}
       >
         <motion.div
@@ -195,7 +195,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
             style={{ borderBottom: "1px solid var(--border)" }}
           >
             <div className="flex items-center gap-2">
-              <Sparkles size={18} className="text-indigo-500" />
+              <Sparkles size={18} className="text-[var(--primary-text)]" />
               <h2 className="text-base font-bold" style={{ color: "var(--text-primary)" }}>
                 Choose Profile Picture
               </h2>
@@ -203,7 +203,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
             <button
               onClick={onClose}
               disabled={isSaving}
-              className="icon-btn"
+              className="icon-btn min-h-11 min-w-11"
               aria-label="Close"
               style={{ touchAction: "manipulation" }}
             >
@@ -221,14 +221,14 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
           >
             <div className="relative">
               {localPreviewUrl ? (
-                <img src={localPreviewUrl} alt={displayName || "Preview"} className="h-[68px] w-[68px] rounded-2xl object-cover shadow-sm" style={{ border: "2px solid rgba(99,102,241,0.5)" }} />
+                <img src={localPreviewUrl} alt={displayName || "Preview"} className="h-[68px] w-[68px] rounded-2xl object-cover shadow-sm" style={{ border: "2px solid var(--primary-glow)" }} />
               ) : (
                 <Avatar
                   src={selectedUrl}
                   name={displayName || "Preview"}
                   size={68}
                   className="w-[68px] h-[68px] rounded-2xl object-cover shadow-sm"
-                  style={{ border: "2px solid rgba(99,102,241,0.5)" }}
+                  style={{ border: "2px solid var(--primary-glow)" }}
                 />
               )}
             </div>
@@ -240,10 +240,10 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                 {displayName || "Your Profile"}
               </div>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSaving} className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-500 disabled:opacity-50">
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSaving} className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--primary-text)] disabled:opacity-50">
                 <Upload size={12} /> Upload image
               </button>
-              {isSaving && selectedFile && <div className="mt-1 h-1 w-full overflow-hidden rounded bg-black/10"><div className="h-full bg-indigo-500" style={{ width: `${uploadProgress}%` }} /></div>}
+              {isSaving && selectedFile && <div className="mt-1 h-1 w-full overflow-hidden rounded bg-[var(--subtle)]"><div className="h-full bg-[var(--primary)]" style={{ width: `${uploadProgress}%` }} /></div>}
             </div>
           </div>
 
@@ -257,7 +257,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
               onClick={() => setActiveTab("avatars")}
               className={`flex items-center gap-1.5 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
                 activeTab === "avatars"
-                  ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                  ? "border-[var(--primary-border)] text-[var(--primary-text)] dark:text-[var(--primary-text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               }`}
             >
@@ -269,7 +269,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
               onClick={() => setActiveTab("gifs")}
               className={`flex items-center gap-1.5 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
                 activeTab === "gifs"
-                  ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                  ? "border-[var(--primary-border)] text-[var(--primary-text)] dark:text-[var(--primary-text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               }`}
             >
@@ -281,7 +281,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
               onClick={() => setActiveTab("url")}
               className={`flex items-center gap-1.5 pb-2.5 text-xs font-semibold border-b-2 transition-colors ${
                 activeTab === "url"
-                  ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                  ? "border-[var(--primary-border)] text-[var(--primary-text)] dark:text-[var(--primary-text)]"
                   : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               }`}
             >
@@ -304,9 +304,9 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                     onClick={handleShuffle}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-colors"
                     style={{
-                      background: "rgba(99, 102, 241, 0.12)",
+                      background: "var(--primary-soft)",
                       color: "var(--primary-light)",
-                      border: "1px solid rgba(99, 102, 241, 0.25)",
+                      border: "1px solid var(--primary-glow)",
                     }}
                   >
                     <Shuffle size={13} />
@@ -325,7 +325,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                         onClick={() => handleSelectStyle(style.id)}
                         className={`p-2.5 rounded-xl flex flex-col items-center gap-2 transition-all text-center relative ${
                           isSelected
-                            ? "ring-2 ring-indigo-500 bg-indigo-500/10"
+                            ? "ring-2 ring-[var(--ring)] bg-[var(--primary-soft)]"
                             : "hover:bg-[var(--surface-3)]"
                         }`}
                         style={{
@@ -343,7 +343,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                           {style.label}
                         </span>
                         {isSelected && (
-                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-indigo-600 text-white flex items-center justify-center">
+                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[var(--primary)] text-[var(--on-primary)] flex items-center justify-center">
                             <Check size={10} strokeWidth={3} />
                           </div>
                         )}
@@ -383,30 +383,30 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                       style={{
                         background: "var(--surface-3)",
                         border: urlError
-                          ? "1px solid #ef4444"
+                          ? "1px solid var(--danger)"
                           : urlValid
-                          ? "1px solid #10b981"
+                          ? "1px solid var(--success)"
                           : "1px solid var(--border)",
                         color: "var(--text-primary)",
                       }}
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      {urlTesting && <Loader2 size={14} className="animate-spin text-indigo-500" />}
-                      {urlValid && <Check size={14} className="text-emerald-500" />}
+                      {urlTesting && <Loader2 size={14} className="animate-spin text-[var(--primary-text)]" />}
+                      {urlValid && <Check size={14} className="text-[var(--success)]" />}
                     </div>
                   </div>
                 </div>
 
                 {urlError && (
-                  <div className="text-xs text-red-500 leading-tight">
+                  <div className="text-xs text-[var(--danger-text)] leading-tight">
                     {urlError}
                   </div>
                 )}
 
                 {urlValid && (
-                  <div className="p-3 rounded-xl flex items-center gap-3" style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.25)" }}>
-                    <Check size={16} className="text-emerald-500 flex-shrink-0" />
-                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                  <div className="p-3 rounded-xl flex items-center gap-3" style={{ background: "var(--success-bg)", border: "1px solid var(--success)" }}>
+                    <Check size={16} className="text-[var(--success)] flex-shrink-0" />
+                    <span className="text-xs text-[var(--success-text)] font-medium">
                       Valid image URL! Preview updated above.
                     </span>
                   </div>
@@ -414,7 +414,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
 
                 <div className="p-3 rounded-xl text-xs space-y-1" style={{ background: "var(--surface-3)", color: "var(--text-muted)" }}>
                   <p className="font-semibold text-[var(--text-secondary)]">Tips for direct links:</p>
-                  <p>• Must begin with <code className="text-indigo-400">https://</code></p>
+                  <p>• Must begin with <code className="text-[var(--primary-text)]">https://</code></p>
                   <p>• Supported formats: PNG, JPG, WebP, GIF, SVG</p>
                   <p>• Data URLs (data:) and blob: URLs are not allowed for security</p>
                 </div>
@@ -428,7 +428,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
             style={{ borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}
           >
             {saveError && (
-              <span className="text-xs text-red-500 truncate flex-1">{saveError}</span>
+              <span className="text-xs text-[var(--danger-text)] truncate flex-1">{saveError}</span>
             )}
             <div className="flex items-center gap-2 ml-auto">
               <button
@@ -447,7 +447,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
                 type="button"
                 onClick={handleSaveClick}
                 disabled={isSaving || !selectedUrl}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl text-white bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm disabled:opacity-50"
+                className="ember-primary-action inline-flex min-h-11 items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition-colors disabled:opacity-50"
               >
                 {isSaving ? (
                   <>

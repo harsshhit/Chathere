@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef } from "react";
 import { useLocation, matchPath } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext } from "../context/ChatContext";
+import { ChatContext, UserDocumentContext } from "../context/ChatContext";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { notifyMessage, updateTitleUnread } from "../utils/notify";
@@ -15,6 +15,8 @@ import { registerPushToken } from "../utils/pushToken";
 const GlobalNotificationListener = () => {
   const { currentUser } = useContext(AuthContext);
   const { data: chatContextData } = useContext(ChatContext);
+  const userDocument = useContext(UserDocumentContext);
+  const chatPrefsRef = useRef(userDocument.chatPrefs || {});
   const location = useLocation();
 
   // Match URL to get active chat ID accurately
@@ -25,6 +27,10 @@ const GlobalNotificationListener = () => {
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  useEffect(() => {
+    chatPrefsRef.current = userDocument.chatPrefs || {};
+  }, [userDocument.chatPrefs]);
 
   const notifiedIdsRef = useRef(new Set());
   const isFirstSnapshotRef = useRef(true);
@@ -130,7 +136,8 @@ const GlobalNotificationListener = () => {
             const isDifferentChat = cId !== activeChatIdRef.current;
 
             // Trigger alert if app is backgrounded, window is unfocused, or user is in a different chat
-            if (isDocHidden || isWindowUnfocused || isDifferentChat) {
+            const isMuted = (chatPrefsRef.current?.[cId]?.mutedUntil || 0) > Date.now();
+            if (!isMuted && (isDocHidden || isWindowUnfocused || isDifferentChat)) {
               const senderName = cData.userInfo?.displayName || "New Message";
               const messageText = newLastMsg.text || "Sent a message";
               const photoURL = cData.userInfo?.photoURL || "/icon-192.png";

@@ -166,7 +166,7 @@ const CreateGroup = ({ onClose }) => {
       >
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
-            <Users size={20} className="text-indigo-400" /> New Group
+            <Users size={20} className="text-[var(--primary-text)]" /> New Group
           </h2>
           <button
             onClick={onClose}
@@ -197,7 +197,7 @@ const CreateGroup = ({ onClose }) => {
             {uploadingPhoto ? `Uploading ${uploadProgress}%` : "Group photo"}
           </button>
           {photoPreviewUrl && <img src={photoPreviewUrl} alt="Group" className="h-10 w-10 rounded-lg object-cover" />}
-          {photoError && <div className="min-w-0 flex-1 text-[11px] text-red-500"><span className="block truncate">{photoError}</span><button type="button" onClick={retryGroupPhotoUpload} disabled={uploadingPhoto} className="font-semibold underline disabled:opacity-50">Retry</button></div>}
+          {photoError && <div className="min-w-0 flex-1 text-[11px] text-[var(--danger-text)]"><span className="block truncate">{photoError}</span><button type="button" onClick={retryGroupPhotoUpload} disabled={uploadingPhoto} className="font-semibold underline disabled:opacity-50">Retry</button></div>}
         </div>
 
         <div>
@@ -217,7 +217,7 @@ const CreateGroup = ({ onClose }) => {
           <div className="flex-1 h-[180px] overflow-y-auto mb-2 custom-scrollbar pr-1">
             {loading ? (
                <div className="h-full flex items-center justify-center">
-                 <Loader2 className="animate-spin text-indigo-400" size={20} />
+                 <Loader2 className="animate-spin text-[var(--primary-text)]" size={20} />
                </div>
             ) : users.length > 0 ? (
                <div className="space-y-1">
@@ -228,7 +228,7 @@ const CreateGroup = ({ onClose }) => {
                        key={user.uid} 
                        onClick={() => toggleUser(user)}
                        className="flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-colors hover:bg-[var(--hover)]"
-                       style={{ background: isSelected ? "rgba(99,102,241,0.15)" : "transparent" }}
+                       style={{ background: isSelected ? "var(--primary-soft)" : "transparent" }}
                      >
                        <Avatar src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full" />
                        <span className="flex-1 text-sm font-medium text-[var(--text-primary)]">{user.displayName}</span>
@@ -250,7 +250,7 @@ const CreateGroup = ({ onClose }) => {
         <button 
           onClick={handleCreateGroup}
           disabled={creating || uploadingPhoto || (groupPhoto && !groupPhotoUrl) || !groupName.trim() || selectedUsers.length === 0}
-          className="w-full py-3 mt-2 rounded-xl text-sm font-bold flex items-center justify-center transition-all disabled:opacity-50 hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)] disabled:shadow-none"
+          className="w-full py-3 mt-2 rounded-xl text-sm font-bold flex items-center justify-center transition-all disabled:opacity-50 hover:shadow-[0_4px_16px_var(--primary-glow)] disabled:shadow-none"
           style={{ background: "linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)", color: "white" }}
         >
           {creating ? <Loader2 size={16} className="animate-spin" /> : "Create Group"}

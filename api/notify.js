@@ -76,8 +76,13 @@ module.exports = async (req, res) => {
       .slice(0, 50);
     const authorizedRecipients = await Promise.all(
       candidates.map(async (uid) => {
-        const chatDoc = await db.collection("userChats").doc(uid).get();
-        return chatDoc.exists && hasChat(chatDoc.data() || {}, chatId) ? uid : null;
+        const [chatDoc, userDoc] = await Promise.all([
+          db.collection("userChats").doc(uid).get(),
+          db.collection("users").doc(uid).get(),
+        ]);
+        if (!chatDoc.exists || !hasChat(chatDoc.data() || {}, chatId)) return null;
+        const mutedUntil = userDoc.data()?.chatPrefs?.[chatId]?.mutedUntil || 0;
+        return mutedUntil > Date.now() ? null : uid;
       })
     );
     const authorizedRecipientUids = authorizedRecipients.filter(Boolean);

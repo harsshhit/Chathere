@@ -66,30 +66,30 @@ const InstallBanner = () => {
         className="px-3 pt-2 pb-1 overflow-hidden"
       >
         <div
-          className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl shadow-sm text-xs"
+          className="glass flex items-center justify-between gap-2.5 rounded-2xl px-3 py-2.5 text-xs"
           style={{
-            background: "rgba(99, 102, 241, 0.12)",
-            border: "1px solid rgba(99, 102, 241, 0.28)",
+            background: "var(--glass-bg)",
+            border: "1px solid var(--border-strong)",
             color: "var(--text-primary)",
           }}
         >
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "rgba(99, 102, 241, 0.22)" }}
+              style={{ background: "var(--primary-glow)" }}
             >
               {isIOS ? (
-                <Share2 size={14} className="text-indigo-500" />
+                <Share2 size={14} className="text-[var(--primary-text)]" />
               ) : (
-                <Download size={14} className="text-indigo-500" />
+                <Download size={14} className="text-[var(--primary-text)]" />
               )}
             </div>
 
             {isIOS ? (
               <div className="text-[11px] leading-tight text-[var(--text-secondary)]">
                 <span className="font-semibold text-[var(--text-primary)]">Install app:</span>{" "}
-                Tap <Share2 size={11} className="inline mx-0.5 text-indigo-400" /> Share then{" "}
-                <PlusSquare size={11} className="inline mx-0.5 text-indigo-400" />{" "}
+                Tap <Share2 size={11} className="inline mx-0.5 text-[var(--primary-text)]" /> Share then{" "}
+                <PlusSquare size={11} className="inline mx-0.5 text-[var(--primary-text)]" />{" "}
                 Add to Home Screen.
               </div>
             ) : (
@@ -110,7 +110,7 @@ const InstallBanner = () => {
                 type="button"
                 onClick={handleInstallClick}
                 disabled={isPrompting}
-                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm disabled:opacity-50"
+                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
                 style={{ touchAction: "manipulation" }}
               >
                 {isPrompting ? "..." : "Install"}

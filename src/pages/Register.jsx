@@ -120,9 +120,9 @@ const Register = () => {
 
   const passwordStrength = () => {
     if (password.length === 0) return null;
-    if (password.length < 6) return { label: "Weak", color: "#ef4444", width: "33%" };
-    if (password.length < 10) return { label: "Medium", color: "#f59e0b", width: "66%" };
-    return { label: "Strong", color: "#22c55e", width: "100%" };
+    if (password.length < 6) return { label: "Weak", color: "var(--danger)", width: "33%" };
+    if (password.length < 10) return { label: "Medium", color: "var(--warning-text)", width: "66%" };
+    return { label: "Strong", color: "var(--success)", width: "100%" };
   };
 
   const strength = passwordStrength();
@@ -131,11 +131,11 @@ const Register = () => {
     <div className="auth-bg min-h-[100dvh] flex items-center justify-center p-4 sm:p-6">
       <div
         className="pointer-events-none fixed top-0 left-0 w-[500px] h-[500px] rounded-full opacity-15"
-        style={{ background: "radial-gradient(circle, #6366f1 0%, transparent 70%)", filter: "blur(60px)", transform: "translate(-40%, -30%)" }}
+        style={{ background: "radial-gradient(circle, var(--primary-soft) 0%, transparent 70%)", filter: "blur(60px)", transform: "translate(-40%, -30%)" }}
       />
       <div
         className="pointer-events-none fixed bottom-0 right-0 w-[400px] h-[400px] rounded-full opacity-15"
-        style={{ background: "radial-gradient(circle, #a78bfa 0%, transparent 70%)", filter: "blur(60px)", transform: "translate(30%, 30%)" }}
+        style={{ background: "radial-gradient(circle, var(--primary-glow) 0%, transparent 70%)", filter: "blur(60px)", transform: "translate(30%, 30%)" }}
       />
 
       <motion.div
@@ -160,11 +160,11 @@ const Register = () => {
                 size={76}
                 className="w-[76px] h-[76px] rounded-2xl object-cover"
                 style={{
-                  border: "2px solid rgba(99,102,241,0.6)",
-                  boxShadow: "0 8px 24px rgba(99,102,241,0.25)",
+                  border: "2px solid var(--primary-border)",
+                  boxShadow: "0 8px 24px var(--primary-glow)",
                 }}
               />
-              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center shadow-sm">
+              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-[var(--primary)] rounded-full flex items-center justify-center shadow-sm">
                 <Sparkles size={12} className="text-white" />
               </div>
             </div>
@@ -253,7 +253,7 @@ const Register = () => {
               <motion.div
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 text-xs text-red-400 px-1"
+                className="flex items-center gap-2 text-xs text-[var(--danger-text)] px-1"
               >
                 <AlertCircle size={14} className="flex-shrink-0" />
                 <span>{errMsg}</span>

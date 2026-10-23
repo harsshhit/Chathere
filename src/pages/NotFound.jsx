@@ -12,7 +12,7 @@ const NotFound = () => {
         transition={{ duration: 0.4 }}
         className="glass-card p-8 max-w-md w-full text-center"
       >
-        <div className="w-20 h-20 rounded-3xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mx-auto mb-6 border border-indigo-500/20">
+        <div className="w-20 h-20 rounded-3xl bg-[var(--primary-soft)] text-[var(--primary-text)] flex items-center justify-center mx-auto mb-6 border border-[var(--primary-border)]">
           <MessageSquareOff size={36} />
         </div>
         <h1 className="text-3xl font-extrabold text-[var(--text-primary)] mb-2">404</h1>
@@ -22,7 +22,7 @@ const NotFound = () => {
         </p>
         <Link
           to="/"
-          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-all duration-200 shadow-lg shadow-indigo-600/30"
+          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-all duration-200 shadow-[0_8px_24px_var(--primary-glow)]"
         >
           <Home size={16} />
           Back to ChatHere Home

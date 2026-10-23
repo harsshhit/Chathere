@@ -1,8 +1,23 @@
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { deleteField, doc, FieldPath, onSnapshot, updateDoc } from "firebase/firestore";
 import React, { useContext, useEffect, useState, useRef, memo, useCallback } from "react";
-import { MessageCircle, Archive, ArchiveRestore, ChevronLeft } from "lucide-react";
+import {
+  MessageCircle,
+  Archive,
+  ArchiveRestore,
+  MoreVertical,
+  Pin,
+  BellOff,
+  Bell,
+  Check,
+  CheckCheck,
+  FileText,
+  Film,
+  Image as ImageIcon,
+  Mic,
+  Users,
+} from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext } from "../context/ChatContext";
+import { ChatContext, UserDocumentContext } from "../context/ChatContext";
 import { db } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
@@ -20,115 +35,165 @@ const ChatItem = memo(function ChatItem({
   isOwnLastMsg,
   formattedDate,
   onSelect,
-  onArchiveToggle,
+  onMenuOpen,
+  preference,
   canHover,
   staggerDelay,
+  currentUserUid,
 }) {
+  const pressTimer = useRef(null);
+  const longPressTriggered = useRef(false);
+  const lastMessage = chat.lastMessage;
+  const muted = preference.mutedUntil > Date.now();
+  const typing = Object.entries(chat.typing || {}).some(
+    ([uid, isTyping]) => uid !== currentUserUid && isTyping
+  );
+  const presence = chat.userInfo?.presence;
+  const isOnline = chat.userInfo?.online === true || presence === "online";
+  const messageTime = lastMessage?.date?.seconds
+    ? lastMessage.date.seconds * 1000
+    : Number(lastMessage?.date || 0);
+  const readTimes = Object.entries(chat.lastRead || chat.readReceipts || {})
+    .filter(([uid]) => uid !== currentUserUid)
+    .map(([, timestamp]) => Number(timestamp?.seconds ? timestamp.seconds * 1000 : timestamp));
+  const isRead = Boolean(
+    lastMessage?.read ||
+    lastMessage?.status === "read" ||
+    (messageTime && readTimes.some((timestamp) => timestamp >= messageTime))
+  );
+  const previewIcon = lastMessage?.type === "image" || lastMessage?.img
+    ? ImageIcon
+    : lastMessage?.type === "gif"
+    ? Film
+    : lastMessage?.file?.mime?.startsWith("audio/")
+    ? Mic
+    : lastMessage?.file
+    ? FileText
+    : null;
+  const PreviewIcon = previewIcon;
+  const handleSelect = () => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    onSelect(chat.userInfo, chatId);
+  };
+
   return (
     <motion.div
       key={chatId}
+      role="button"
+      tabIndex={0}
+      aria-label={`${chat.userInfo?.displayName || "Chat"}${hasUnread ? `, ${unreadCount} unread` : ""}`}
+      aria-current={isActive ? "true" : undefined}
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
+      exit={{ opacity: 0, x: 8 }}
       transition={{ delay: staggerDelay, duration: 0.2 }}
-      onClick={() => onSelect(chat.userInfo, chatId)}
-      className="flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-all duration-200 group relative"
+      onClick={handleSelect}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(chat.userInfo, chatId);
+        }
+      }}
+      onContextMenu={(event) => { event.preventDefault(); onMenuOpen(event, chatId); }}
+      onPointerDown={(event) => {
+        if (event.pointerType !== "touch") return;
+        const element = event.currentTarget;
+        pressTimer.current = window.setTimeout(() => {
+          longPressTriggered.current = true;
+          onMenuOpen({ currentTarget: element, stopPropagation: () => {} }, chatId);
+        }, 550);
+      }}
+      onPointerUp={() => window.clearTimeout(pressTimer.current)}
+      onPointerCancel={() => window.clearTimeout(pressTimer.current)}
+      className={`row flex min-h-[72px] items-center gap-3 rounded-2xl px-3 py-2.5 cursor-pointer group relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${isActive ? "chat-row-active" : ""}`}
       style={{
         background: isActive
-          ? "rgba(99,102,241,0.15)"
-          : hasUnread
-          ? "rgba(99,102,241,0.06)"
+          ? "var(--glass-bg)"
           : "transparent",
-        borderLeft: isActive
-          ? "3px solid var(--primary)"
-          : hasUnread
-          ? "3px solid var(--primary-light)"
-          : "3px solid transparent",
+        border: isActive ? "1px solid var(--border-strong)" : "1px solid transparent",
         touchAction: "manipulation",
       }}
       whileHover={
         canHover
           ? {
-              backgroundColor: isActive ? "rgba(99,102,241,0.15)" : "var(--hover)",
+              backgroundColor: isActive ? "var(--glass-bg)" : "var(--hover)",
             }
           : undefined
       }
-      whileTap={{ scale: 0.98 }}
     >
       <div className="relative flex-shrink-0">
         <Avatar
           src={chat.userInfo?.photoURL}
           alt={chat.userInfo?.displayName}
-          className="w-12 h-12 rounded-2xl"
+          className="h-[52px] w-[52px] rounded-full"
           style={{
-            border: hasUnread
-              ? "2px solid var(--primary-light)"
-              : "1.5px solid rgba(99,102,241,0.25)",
+            border: "1px solid var(--border-strong)",
           }}
         />
-        {hasUnread && (
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-primary border-2 border-[var(--surface-2)]" />
+        {isOnline && (
+          <span className="avatar-dot-online absolute bottom-0 right-0" aria-label="Online" />
         )}
       </div>
 
-      <div className="flex-1 min-w-0 pr-6">
-        <div className="flex justify-between items-baseline gap-2 mb-0.5">
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex min-w-0 items-center gap-1.5">
           <span
-            className={`text-sm truncate ${
+            className={`truncate text-base leading-5 text-[var(--text-primary)] ${
               hasUnread
-                ? "font-extrabold text-[var(--text-primary)]"
-                : "font-semibold text-[var(--text-primary)]"
+                ? "font-bold"
+                : "font-semibold"
             }`}
           >
             {chat.userInfo?.displayName}
           </span>
-          {formattedDate && (
-            <span
-              className={`text-[10px] flex-shrink-0 ${
-                hasUnread ? "font-bold text-[var(--unread-meta)]" : "text-[var(--text-muted)]"
-              }`}
-            >
-              {formattedDate}
-            </span>
-          )}
         </div>
 
-        {chat.lastMessage ? (
-          <p
-            className={`text-xs truncate ${
-              hasUnread ? "font-bold text-[var(--unread-text)]" : "text-[var(--text-muted)]"
-            }`}
-          >
-            {isOwnLastMsg && <span style={{ color: "var(--primary-light)" }}>You: </span>}
-            {chat.lastMessage.text || "Sent an attachment"}
-          </p>
-        ) : (
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Start a conversation
-          </p>
-        )}
+        <p className={`flex min-w-0 items-center gap-1 truncate text-sm leading-5 ${hasUnread ? "font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+          {typing ? (
+            <span className="truncate font-medium text-[var(--primary-text)]">typing…</span>
+          ) : (
+            <>
+              {isOwnLastMsg && <span className="shrink-0">You:</span>}
+              {isOwnLastMsg && (
+                isRead
+                  ? <CheckCheck size={16} className="shrink-0 text-[var(--seen)]" aria-label="Read" />
+                  : <Check size={15} className="shrink-0 text-[var(--text-muted)]" aria-label="Sent" />
+              )}
+              {PreviewIcon && <PreviewIcon size={15} className="shrink-0 text-[var(--text-muted)]" />}
+              <span className="truncate">
+                {lastMessage?.text || (lastMessage ? "Sent an attachment" : "Start a conversation")}
+              </span>
+            </>
+          )}
+        </p>
       </div>
 
-      {hasUnread && (
-        <div className="flex-shrink-0 px-2 py-0.5 text-[11px] font-black rounded-full text-white bg-indigo-600 shadow-md shadow-indigo-600/40 animate-pulse">
-          {unreadCount}
+      <div className="flex w-[68px] flex-shrink-0 flex-col items-end justify-center gap-1">
+        <span className="text-xs leading-4 text-[var(--text-muted)]">
+          {formattedDate}
+        </span>
+        <div className="flex h-5 items-center gap-1.5">
+          {preference.pinned && <Pin size={13} className="text-[var(--text-muted)]" aria-label="Pinned chat" />}
+          {muted && <BellOff size={13} className="text-[var(--text-muted)]" aria-label="Muted chat" />}
+          {hasUnread && <span className="badge-unread">{unreadCount}</span>}
         </div>
-      )}
+      </div>
 
-      <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+      <div className="flex shrink-0 items-center justify-center">
         <button
-          onClick={(e) => onArchiveToggle(e, chatId, chat.isArchived)}
-          className="p-2 rounded-xl transition-all duration-200"
-          style={{
-            background: "var(--chip-bg)",
-            border: "1px solid var(--border-light)",
-            color: "var(--text-primary)",
-            touchAction: "manipulation",
-          }}
-          title={chat.isArchived ? "Unarchive chat" : "Archive chat"}
-          aria-label={chat.isArchived ? "Unarchive chat" : "Archive chat"}
+          type="button"
+          onClick={(event) => onMenuOpen(event, chatId)}
+          onContextMenu={(event) => { event.preventDefault(); onMenuOpen(event, chatId); }}
+          className="rounded-full p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100"
+          title="Chat options"
+          aria-label={`Options for ${chat.userInfo?.displayName || "chat"}`}
+          aria-haspopup="menu"
         >
-          {chat.isArchived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+          <MoreVertical size={16} />
         </button>
       </div>
     </motion.div>
@@ -137,11 +202,13 @@ const ChatItem = memo(function ChatItem({
 
 const Chats = () => {
   const [chats, setChats] = useState({});
-  const [showArchived, setShowArchived] = useState(false);
+  const [filter, setFilter] = useState("all");
   const [canHover, setCanHover] = useState(false);
+  const [menu, setMenu] = useState(null);
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch, data: activeChatData } = useContext(ChatContext);
+  const userDocument = useContext(UserDocumentContext);
   const navigate = useNavigate();
   const { chatId: routeChatId } = useParams();
 
@@ -165,6 +232,12 @@ const Chats = () => {
   const handleScroll = (e) => {
     savedChatListScroll = e.currentTarget.scrollTop;
   };
+
+  useEffect(() => {
+    const openArchived = () => setFilter("archived");
+    window.addEventListener("chathere:show-archived", openArchived);
+    return () => window.removeEventListener("chathere:show-archived", openArchived);
+  }, []);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -213,19 +286,54 @@ const Chats = () => {
     [currentUser?.uid, dispatch, navigate, chats]
   );
 
-  const handleArchiveToggle = useCallback(
-    async (e, chatId, currentStatus) => {
-      e.stopPropagation();
+  const saveChatPreference = useCallback(
+    async (chatId, key, value) => {
       try {
-        await updateDoc(doc(db, "userChats", currentUser.uid), {
-          [`${chatId}.isArchived`]: !currentStatus,
-        });
+        await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", chatId, key), value);
       } catch (err) {
-        console.error(err);
+        console.error("Error saving chat preference:", err);
       }
     },
     [currentUser?.uid]
   );
+
+  const handleMenuOpen = useCallback((event, chatId) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ chatId, x: Math.min(rect.left, window.innerWidth - 220), y: Math.min(rect.bottom, window.innerHeight - 260) });
+  }, []);
+
+  const handlePreference = useCallback(async (key, value) => {
+    if (!menu?.chatId) return;
+    const chatId = menu.chatId;
+    setMenu(null);
+    await saveChatPreference(chatId, key, value);
+  }, [menu, saveChatPreference]);
+
+  const handleMute = useCallback(async (duration) => {
+    if (!menu?.chatId) return;
+    const chatId = menu.chatId;
+    setMenu(null);
+    try {
+      const value = duration === "off" ? deleteField() : duration === "always" ? 9999999999999 : Date.now() + duration;
+      await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", chatId, "mutedUntil"), value);
+    } catch (err) {
+      console.error("Error saving mute preference:", err);
+    }
+  }, [currentUser?.uid, menu]);
+
+  const handlePin = useCallback(async () => {
+    if (!menu?.chatId) return;
+    const chatId = menu.chatId;
+    const isPinned = Boolean(userDocument.chatPrefs?.[chatId]?.pinned);
+    if (!isPinned && Object.values(userDocument.chatPrefs || {}).filter((item) => item?.pinned).length >= 3) {
+      window.alert("You can pin up to 3 chats.");
+      setMenu(null);
+      return;
+    }
+    setMenu(null);
+    await saveChatPreference(chatId, "pinned", !isPinned);
+  }, [menu, saveChatPreference, userDocument.chatPrefs]);
 
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return "";
@@ -257,9 +365,36 @@ const Chats = () => {
       return timeB - timeA;
     });
 
-  const unarchivedChats = sortedChats.filter(([_, chat]) => !chat.isArchived);
-  const archivedChats = sortedChats.filter(([_, chat]) => chat.isArchived);
-  const displayedChats = showArchived ? archivedChats : unarchivedChats;
+  const preferences = userDocument.chatPrefs || {};
+  const orderedChats = sortedChats.sort(([chatIdA], [chatIdB]) => Number(Boolean(preferences[chatIdB]?.pinned)) - Number(Boolean(preferences[chatIdA]?.pinned)));
+  const unarchivedChats = orderedChats.filter(([chatId]) => !preferences[chatId]?.archived);
+  const archivedChats = orderedChats.filter(([chatId]) => preferences[chatId]?.archived);
+  const unreadChats = unarchivedChats.filter(([, chat]) => (chat.unread || 0) > 0);
+  const groupChats = unarchivedChats.filter(([, chat]) => chat.userInfo?.isGroup);
+  const pinnedChats = unarchivedChats.filter(([chatId]) => preferences[chatId]?.pinned);
+  const displayedChats = filter === "archived"
+    ? archivedChats
+    : filter === "unread"
+    ? unreadChats
+    : filter === "groups"
+    ? groupChats
+    : filter === "pinned"
+    ? pinnedChats
+    : unarchivedChats;
+  const filterOptions = [
+    { id: "all", label: "All" },
+    { id: "unread", label: "Unread", count: unreadChats.length },
+    { id: "groups", label: "Groups" },
+    { id: "pinned", label: "Pinned" },
+    { id: "archived", label: "Archived", count: archivedChats.length },
+  ];
+  const emptyState = {
+    all: ["No conversations yet", "Search for someone to start chatting."],
+    unread: ["All caught up", "New unread messages will appear here."],
+    groups: ["No group chats yet", "Create a group to bring people together."],
+    pinned: ["No pinned chats", "Pin a chat from its options menu to keep it here."],
+    archived: ["No archived chats", "Archived conversations will appear here."],
+  }[filter];
 
   // After first render, disable the staggered entrance delay
   useEffect(() => {
@@ -274,44 +409,24 @@ const Chats = () => {
     <div
       ref={scrollContainerRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto py-2 flex flex-col overscroll-contain"
-      style={{ background: "var(--surface-2)", overscrollBehavior: "contain" }}
+      data-main-scroll
+      className="flex-1 overflow-y-auto pb-28 pt-1 flex flex-col overscroll-contain md:pb-4"
+      style={{ background: "transparent", overscrollBehavior: "contain" }}
     >
-      {showArchived && (
-        <div
-          className="px-4 py-2 mb-2 flex items-center w-full"
-          style={{ borderBottom: "1px solid var(--border)" }}
-        >
+      <div className="filter-chip-scroll mx-4 mb-2 flex gap-2">
+        {filterOptions.map(({ id, label, count }) => (
           <button
-            onClick={() => setShowArchived(false)}
-            className="flex items-center gap-2 text-sm font-medium transition-colors"
-            style={{ color: "var(--primary-light)", touchAction: "manipulation" }}
+            key={id}
+            type="button"
+            onClick={() => setFilter(id)}
+            aria-pressed={filter === id}
+            className={`chip shrink-0 transition-colors ${filter === id ? "chip-active" : ""}`}
           >
-            <ChevronLeft size={16} /> Back to Chats
+            {label}
+            {count > 0 && <span className="text-[11px] opacity-75">{count}</span>}
           </button>
-        </div>
-      )}
-
-      {!showArchived && archivedChats.length > 0 && (
-        <div
-          onClick={() => setShowArchived(true)}
-          className="flex items-center justify-between px-4 py-3 mx-2 mb-2 rounded-xl cursor-pointer transition-colors duration-200"
-          style={{ background: "var(--subtle)", touchAction: "manipulation" }}
-        >
-          <div className="flex items-center gap-3">
-            <Archive size={18} style={{ color: "var(--text-muted)" }} />
-            <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-              Archived
-            </span>
-          </div>
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{ background: "var(--surface-3)", color: "var(--primary-light)" }}
-          >
-            {archivedChats.length}
-          </span>
-        </div>
-      )}
+        ))}
+      </div>
 
       <AnimatePresence mode="popLayout">
         {displayedChats.length === 0 ? (
@@ -323,26 +438,25 @@ const Chats = () => {
             className="flex flex-col items-center justify-center flex-1 pt-12 px-6 text-center"
           >
             <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-              style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
+              className="glass mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
             >
-              {showArchived ? (
+              {filter === "archived" ? (
                 <Archive size={28} style={{ color: "var(--text-muted)" }} />
+              ) : filter === "groups" ? (
+                <Users size={28} style={{ color: "var(--text-muted)" }} />
               ) : (
                 <MessageCircle size={28} style={{ color: "var(--text-muted)" }} />
               )}
             </div>
             <p className="text-sm font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
-              {showArchived ? "No archived chats" : "No conversations yet"}
+              {emptyState[0]}
             </p>
-            {!showArchived && (
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                Search for someone above to start chatting
-              </p>
-            )}
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {emptyState[1]}
+            </p>
           </motion.div>
         ) : (
-          <div key="chat-list" className="space-y-0.5 px-2 pb-4">
+          <motion.div key={`chat-list-${filter}`} layout className="space-y-1 px-3 pb-4">
             {displayedChats.map(([chatId, chat], index) => {
               const unreadCount = chat.unread || 0;
               const hasUnread = unreadCount > 0;
@@ -374,15 +488,39 @@ const Chats = () => {
                   isOwnLastMsg={chat.lastMessage?.senderId === currentUser.uid}
                   formattedDate={formatTimestamp(chat.date)}
                   onSelect={handleSelect}
-                  onArchiveToggle={handleArchiveToggle}
+                  onMenuOpen={handleMenuOpen}
+                  preference={preferences[chatId] || {}}
                   canHover={canHover}
                   staggerDelay={staggerDelay}
+                  currentUserUid={currentUser?.uid}
                 />
               );
             })}
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
+      {menu && (
+        <>
+          <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label="Close chat options" onClick={() => setMenu(null)} />
+          <div role="menu" aria-label="Chat options" className="fixed z-50 w-52 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-1 shadow-xl" style={{ left: menu.x, top: menu.y }}>
+            <button role="menuitem" className="menu-row" onClick={handlePin}><Pin size={15} />{preferences[menu.chatId]?.pinned ? "Unpin chat" : "Pin chat"}</button>
+            <button role="menuitem" className="menu-row" onClick={() => handlePreference("archived", !preferences[menu.chatId]?.archived)}>{preferences[menu.chatId]?.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />}{preferences[menu.chatId]?.archived ? "Unarchive" : "Archive"}</button>
+            {preferences[menu.chatId]?.mutedUntil > Date.now() ? (
+              <button role="menuitem" className="menu-row" onClick={() => handleMute("off")}><Bell size={15} />Unmute</button>
+            ) : (
+              <div className="relative group/mute">
+                <button role="menuitem" className="menu-row w-full"><BellOff size={15} />Mute for...<span className="ml-auto">›</span></button>
+                <div className="absolute left-full top-0 hidden w-36 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-1 shadow-xl group-hover/mute:block focus-within:block">
+                  <button role="menuitem" className="menu-row" onClick={() => handleMute(8 * 60 * 60 * 1000)}>8 hours</button>
+                  <button role="menuitem" className="menu-row" onClick={() => handleMute(7 * 24 * 60 * 60 * 1000)}>1 week</button>
+                  <button role="menuitem" className="menu-row" onClick={() => handleMute("always")}>Always</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      <style>{`.menu-row{display:flex;align-items:center;gap:.65rem;width:100%;padding:.55rem .65rem;border-radius:.4rem;text-align:left;font-size:.82rem;color:var(--text-primary)}.menu-row:hover,.menu-row:focus-visible{background:var(--hover);outline:none}`}</style>
     </div>
   );
 };

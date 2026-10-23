@@ -51,7 +51,7 @@ const applyThemeToDocument = (value) => {
  * Resolution order for the initial theme:
  *   1. localStorage "chathere-theme"
  *   2. users/{uid}.theme in Firestore (once logged in)
- *   3. "light"
+ *   3. "dark"
  */
 export const ThemeProvider = ({ children }) => {
   const { currentUser } = useContext(AuthContext);

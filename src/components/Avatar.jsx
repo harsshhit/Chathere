@@ -29,28 +29,8 @@ function getInitials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/**
- * Deterministic color palette for avatar initials based on name string hash.
- */
-const AVATAR_GRADIENTS = [
-  "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)", // indigo
-  "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)", // purple
-  "linear-gradient(135deg, #ec4899 0%, #db2777 100%)", // pink
-  "linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)", // cyan
-  "linear-gradient(135deg, #10b981 0%, #059669 100%)", // emerald
-  "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)", // amber
-  "linear-gradient(135deg, #f97316 0%, #ea580c 100%)", // orange
-  "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)", // blue
-];
-
-function getAvatarBackground(name) {
-  if (!name) return AVATAR_GRADIENTS[0];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
-  return AVATAR_GRADIENTS[index];
+function getAvatarBackground() {
+  return "var(--primary-soft)";
 }
 
 /**
@@ -92,9 +72,9 @@ const Avatar = ({ src, name, alt, size, className = "", style = {} }) => {
       <div
         role="img"
         aria-label={displayName}
-        className={`inline-flex items-center justify-center font-bold text-white select-none overflow-hidden flex-shrink-0 ${className}`}
+        className={`inline-flex items-center justify-center font-bold text-[var(--text-1)] select-none overflow-hidden flex-shrink-0 ${className}`}
         style={{
-          background: getAvatarBackground(displayName),
+          background: getAvatarBackground(),
           fontSize: size ? (typeof size === "number" ? `${Math.max(10, size * 0.38)}px` : "0.75rem") : "inherit",
           lineHeight: 1,
           ...combinedStyle,

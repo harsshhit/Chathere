@@ -8,6 +8,7 @@ export const ChatContext = createContext();
 export const ContactPanelContext = createContext({});
 export const ContactPanelActionsContext = createContext({});
 export const UserChatsContext = createContext({});
+export const UserDocumentContext = createContext({});
 
 export const ChatContextProvider = ({ children }) => {
   const { currentUser } = useContext(AuthContext);
@@ -33,6 +34,22 @@ export const ChatContextProvider = ({ children }) => {
   const userChatsRef = useRef({});
   const [userChatsSnapshot, setUserChatsSnapshot] = useState({});
   const [userChatsLoaded, setUserChatsLoaded] = useState(false);
+  const [userDocument, setUserDocument] = useState({});
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setUserDocument({});
+      return undefined;
+    }
+
+    const unsub = onSnapshot(
+      doc(db, "users", currentUser.uid),
+      (docSnap) => setUserDocument(docSnap.exists() ? docSnap.data() || {} : {}),
+      (err) => console.error("current user document snapshot error:", err)
+    );
+
+    return () => unsub();
+  }, [currentUser?.uid]);
 
   // Subscribe to the current user's userChats collection
   useEffect(() => {
@@ -264,11 +281,13 @@ export const ChatContextProvider = ({ children }) => {
   return (
     <ChatContext.Provider value={value}>
       <UserChatsContext.Provider value={userChatsSnapshot}>
-        <ContactPanelContext.Provider value={panelValue}>
-          <ContactPanelActionsContext.Provider value={panelActions}>
-            {children}
-          </ContactPanelActionsContext.Provider>
-        </ContactPanelContext.Provider>
+        <UserDocumentContext.Provider value={userDocument}>
+          <ContactPanelContext.Provider value={panelValue}>
+            <ContactPanelActionsContext.Provider value={panelActions}>
+              {children}
+            </ContactPanelActionsContext.Provider>
+          </ContactPanelContext.Provider>
+        </UserDocumentContext.Provider>
       </UserChatsContext.Provider>
     </ChatContext.Provider>
   );

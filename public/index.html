@@ -10,30 +10,35 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="ChatHere" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-  <meta name="theme-color" content="#ffffff" />
+  <meta name="theme-color" content="#120d0b" />
   <meta name="description" content="ChatHere - Real-time Messaging Platform" />
   <script>
     // Apply the saved theme before React mounts to avoid a flash.
     // Keep in sync with src/theme/colors.js (THEME_STORAGE_KEY, META_THEME_COLORS).
     (function () {
-      var theme = "light";
+      var theme = "dark";
       try {
         var stored = localStorage.getItem("chathere-theme");
         if (stored === "light" || stored === "dark") theme = stored;
       } catch (e) { }
       document.documentElement.setAttribute("data-theme", theme);
       var meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute("content", theme === "dark" ? "#0f0f17" : "#ffffff");
+      if (meta) meta.setAttribute("content", theme === "dark" ? "#120d0b" : "#f7efe8");
     })();
   </script>
   <style>
     html {
-      background: #f8f9fc;
+      background: #120d0b;
+      color-scheme: dark;
+    }
+
+    html[data-theme="light"] {
+      background: #f7efe8;
       color-scheme: light;
     }
 
     html[data-theme="dark"] {
-      background: #0f0f17;
+      background: #120d0b;
       color-scheme: dark;
     }
 

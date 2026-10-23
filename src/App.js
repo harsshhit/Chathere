@@ -1,36 +1,13 @@
-import { Route, BrowserRouter, Routes, Navigate, useNavigate } from "react-router-dom";
-import { useContext, lazy, Suspense, useEffect } from "react";
-import { AuthContext } from "./context/AuthContext";
+import { BrowserRouter, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 import { UIProvider } from "./context/UIContext";
 import { ChatContextProvider } from "./context/ChatContext";
 import { InstallProvider } from "./context/InstallContext";
 import useVisualViewport from "./utils/useVisualViewport";
-import { Loader2 } from "lucide-react";
 import GlobalNotificationListener from "./components/GlobalNotificationListener";
+import CommandPalette from "./components/CommandPalette";
+import MobileTabShell from "./components/MobileTabShell";
 import "./index.css";
-
-const Register = lazy(() => import("./pages/Register"));
-const Home = lazy(() => import("./pages/Home"));
-const Login = lazy(() => import("./pages/Login"));
-const Profile = lazy(() => import("./pages/Profile"));
-const Settings = lazy(() => import("./pages/Settings"));
-const NotFound = lazy(() => import("./pages/NotFound"));
-
-// Preload heavy chunks after first paint so navigation is instant
-function ChunkPreloader() {
-  useEffect(() => {
-    const preload = () => {
-      import("./pages/Profile").catch(() => {});
-      import("./pages/Home").catch(() => {});
-    };
-    if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(preload);
-    } else {
-      setTimeout(preload, 2000);
-    }
-  }, []);
-  return null;
-}
 
 // Listen for service worker notification clicks and navigate to the target chat
 function ServiceWorkerMessageListener() {
@@ -54,23 +31,6 @@ function ServiceWorkerMessageListener() {
   return null;
 }
 
-// Lightweight skeleton instead of full-screen spinner
-const LoadingFallback = () => (
-  <div
-    className="min-h-[100dvh] flex items-center justify-center"
-    style={{ background: "var(--surface)" }}
-    aria-label="Loading"
-  >
-    <Loader2 size={28} className="animate-spin" style={{ color: "var(--primary-light)" }} />
-  </div>
-);
-
-// ProtectedRoute defined at module scope — never re-created on render
-const ProtectedRoute = ({ children }) => {
-  const { currentUser } = useContext(AuthContext);
-  return currentUser ? children : <Navigate to="/login" replace />;
-};
-
 const App = () => {
   useVisualViewport();
 
@@ -82,49 +42,10 @@ const App = () => {
           future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         >
           <ChatContextProvider>
-          <ChunkPreloader />
           <ServiceWorkerMessageListener />
           <GlobalNotificationListener />
-          <Suspense fallback={<LoadingFallback />}>
-          <Routes>
-            {/*
-              Nested home layout: "/" and "/chat/:chatId" share the same Home
-              shell (Sidebar always mounted), only the right-pane content changes.
-              Home reads the :chatId param from useParams() to hydrate ChatContext.
-            */}
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Home />
-                </ProtectedRoute>
-              }
-            >
-              {/* /chat/:chatId is a child route so Sidebar stays mounted */}
-              <Route path="chat/:chatId" element={null} />
-            </Route>
-
-            <Route path="login" element={<Login />} />
-            <Route path="register" element={<Register />} />
-            <Route
-              path="profile"
-              element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="settings"
-              element={
-                <ProtectedRoute>
-                  <Settings />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+          <CommandPalette />
+          <MobileTabShell />
         </ChatContextProvider>
       </BrowserRouter>
     </InstallProvider>

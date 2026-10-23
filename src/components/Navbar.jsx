@@ -1,152 +1,121 @@
 import React, { useContext, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import { Archive, MoreHorizontal, Search, Settings, Star, Sun, Moon, UserRound, Users } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import Avatar from "./Avatar";
-import { Users, Sun, Moon, UserRound, Settings } from "lucide-react";
-import CreateGroup from "./CreateGroup";
 import { useTheme } from "../context/ThemeContext";
 
-const Navbar = () => {
+const Navbar = ({ onSearch, searchOpen, onOpenGroup }) => {
   const { currentUser } = useContext(AuthContext);
   const navigate = useNavigate();
-  const [showGroupModal, setShowGroupModal] = useState(false);
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const [showMenu, setShowMenu] = useState(false);
   const isDark = theme === "dark";
 
-  return (
-    <>
-      <div
-        className="px-4 py-3 flex items-center justify-between"
-        style={{
-          background: "var(--surface-2)",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <motion.button
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={() => navigate("/")}
-          className="flex-shrink-0 flex items-center outline-none rounded-xl hover:bg-[var(--hover)] transition-all duration-300 px-2 py-1 -ml-2 cursor-pointer"
-          title="ChatHere"
-        >
-          <span className="brand-logo text-xl sm:text-2xl">ChatHere</span>
-        </motion.button>
+  const openArchived = () => {
+    setShowMenu(false);
+    if (location.pathname !== "/") navigate("/");
+    window.setTimeout(() => window.dispatchEvent(new Event("chathere:show-archived")), 0);
+  };
 
-        <div className="flex items-center gap-2">
+  const openStarred = () => {
+    setShowMenu(false);
+    window.alert("Starred messages will be available with Phase A.");
+  };
+
+  return (
+    <header className="safe-top flex items-center justify-between gap-3 px-4 pb-3 pt-4">
+      <h1 className="text-[30px] font-bold leading-tight tracking-[-0.04em] text-[var(--text-primary)]">
+        Chats
+      </h1>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onSearch}
+          className="icon-btn-glass"
+          title="Search people"
+          aria-label="Search people"
+          aria-expanded={searchOpen}
+          aria-controls="sidebar-search"
+        >
+          <Search size={18} strokeWidth={1.75} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenGroup}
+          className="icon-btn-glass"
+          title="New group"
+          aria-label="New group"
+        >
+          <Users size={18} strokeWidth={1.75} />
+        </button>
+
+        <div className="relative">
           <button
             type="button"
-            onClick={toggleTheme}
-            className="icon-btn flex-shrink-0"
-            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={() => setShowMenu((open) => !open)}
+            className="icon-btn-glass"
+            title="More options"
+            aria-label="More options"
+            aria-haspopup="menu"
+            aria-expanded={showMenu}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={theme}
-                initial={{ rotate: -90, opacity: 0, scale: 0.6 }}
-                animate={{ rotate: 0, opacity: 1, scale: 1 }}
-                exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
-                transition={{ duration: 0.2 }}
-                className="flex"
-              >
-                {isDark ? <Sun size={18} /> : <Moon size={18} />}
-              </motion.span>
-            </AnimatePresence>
+            <MoreHorizontal size={19} strokeWidth={1.75} />
           </button>
-
-          <button
-            onClick={() => setShowGroupModal(true)}
-            className="icon-btn flex-shrink-0"
-            title="New Group"
-            aria-label="New Group"
-          >
-            <Users size={18} />
-          </button>
-
-          <div className="relative">
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-              onPointerDown={() => {
-                import("../pages/Profile").catch(() => {});
-              }}
-              onClick={() => setShowAccountMenu((open) => !open)}
-              className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all duration-200"
-              style={{ background: "var(--subtle)", touchAction: "manipulation" }}
-              title="Account menu"
-              aria-label="Open account menu"
-              aria-haspopup="menu"
-              aria-expanded={showAccountMenu}
-            >
-              <span
-                className="text-sm font-medium max-w-[100px] truncate hidden sm:block"
-                style={{ color: "var(--text-secondary)" }}
+          <AnimatePresence>
+            {showMenu && (
+              <motion.div
+                role="menu"
+                aria-label="Chat list options"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.14 }}
+                className="glass-card absolute right-0 top-full z-40 mt-2 w-52 p-1.5"
               >
-                {currentUser?.displayName}
-              </span>
-              <Avatar
-                src={currentUser?.photoURL}
-                alt={currentUser?.displayName}
-                className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-                style={{
-                  border: "2px solid rgba(99,102,241,0.5)",
-                  boxShadow: "0 2px 12px rgba(99,102,241,0.25)",
-                }}
-              />
-            </motion.button>
-
-            <AnimatePresence>
-              {showAccountMenu && (
-                <motion.div
-                  role="menu"
-                  aria-label="Account options"
-                  initial={{ opacity: 0, y: -5, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.98 }}
-                  transition={{ duration: 0.14 }}
-                  className="absolute right-0 top-full mt-2 z-40 w-48 p-1.5 rounded-xl shadow-xl"
-                  style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setShowMenu(false); navigate("/profile"); }}
+                  className="menu-row"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setShowAccountMenu(false);
-                      navigate("/profile");
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left hover:bg-[var(--hover)]"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    <UserRound size={16} />
-                    Profile
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setShowAccountMenu(false);
-                      navigate("/settings");
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left hover:bg-[var(--hover)]"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    <Settings size={16} />
-                    Settings
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                  <UserRound size={16} /> Profile
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setShowMenu(false); navigate("/settings"); }}
+                  className="menu-row"
+                >
+                  <Settings size={16} /> Settings
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setShowMenu(false); toggleTheme(); }}
+                  className="menu-row"
+                >
+                  {isDark ? <Sun size={16} /> : <Moon size={16} />}
+                  Switch to {isDark ? "light" : "dark"} theme
+                </button>
+                <button type="button" role="menuitem" onClick={openArchived} className="menu-row">
+                  <Archive size={16} /> Archived chats
+                </button>
+                <button type="button" role="menuitem" onClick={openStarred} className="menu-row">
+                  <Star size={16} /> Starred messages
+                </button>
+                <div className="mt-1 border-t border-[var(--border)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                  {currentUser?.displayName || currentUser?.email}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
-
-      <AnimatePresence>
-        {showGroupModal && <CreateGroup onClose={() => setShowGroupModal(false)} />}
-      </AnimatePresence>
-    </>
+      <style>{`.menu-row{display:flex;align-items:center;gap:.65rem;width:100%;padding:.6rem .7rem;border-radius:.65rem;text-align:left;font-size:.84rem;color:var(--text-primary)}.menu-row:hover,.menu-row:focus-visible{background:var(--hover);outline:none}`}</style>
+    </header>
   );
 };
 

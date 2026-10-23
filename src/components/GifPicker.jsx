@@ -157,9 +157,9 @@ const GifPicker = ({ onGifSelect }) => {
               onClick={handleRetry}
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
               style={{
-                background: "rgba(99,102,241,0.15)",
+                background: "var(--primary-soft)",
                 color: "var(--primary-light)",
-                border: "1px solid rgba(99,102,241,0.3)",
+                border: "1px solid var(--primary-glow)",
               }}
             >
               <RefreshCw size={12} />
@@ -193,7 +193,7 @@ const GifPicker = ({ onGifSelect }) => {
               <button
                 key={gif.id}
                 onClick={() => onGifSelect(gif.url)}
-                className="rounded-xl overflow-hidden cursor-pointer transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 touch-action-manipulation"
+                className="rounded-xl overflow-hidden cursor-pointer transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] touch-action-manipulation"
                 style={{
                   position: "relative",
                   paddingBottom: `${(gif.height / gif.width) * 100}%`,

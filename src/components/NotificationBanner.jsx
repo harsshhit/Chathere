@@ -72,19 +72,19 @@ const NotificationBanner = () => {
         className="px-3 pt-2 pb-1 overflow-hidden"
       >
         <div
-          className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl shadow-sm text-xs"
+          className="glass flex items-center justify-between gap-2.5 rounded-2xl px-3 py-2.5 text-xs"
           style={{
-            background: "rgba(99, 102, 241, 0.1)",
-            border: "1px solid rgba(99, 102, 241, 0.25)",
+            background: "var(--glass-bg)",
+            border: "1px solid var(--border-strong)",
             color: "var(--text-primary)",
           }}
         >
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "rgba(99, 102, 241, 0.2)" }}
+              style={{ background: "var(--primary-soft)" }}
             >
-              <Bell size={14} className="text-indigo-500" />
+              <Bell size={14} className="text-[var(--primary-text)]" />
             </div>
             {isIOSNonStandalone ? (
               <div className="text-[11px] leading-tight text-[var(--text-secondary)]">
@@ -92,9 +92,9 @@ const NotificationBanner = () => {
                   On iPhone:
                 </span>{" "}
                 Add ChatHere to your Home Screen to get notifications (Tap{" "}
-                <Share2 size={11} className="inline mx-0.5 text-indigo-400" />{" "}
+                <Share2 size={11} className="inline mx-0.5 text-[var(--primary-text)]" />{" "}
                 Share &gt;{" "}
-                <PlusSquare size={11} className="inline mx-0.5 text-indigo-400" />{" "}
+                <PlusSquare size={11} className="inline mx-0.5 text-[var(--primary-text)]" />{" "}
                 Add to Home Screen).
               </div>
             ) : (
@@ -114,7 +114,7 @@ const NotificationBanner = () => {
               <button
                 onClick={handleEnable}
                 disabled={isRequesting}
-                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm disabled:opacity-50"
+                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
                 style={{ touchAction: "manipulation" }}
               >
                 {isRequesting ? "..." : "Enable"}

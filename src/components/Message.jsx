@@ -1,4 +1,4 @@
-import React, { useContext, useRef, useState, useEffect, memo } from "react";
+import React, { useContext, useRef, useState, useEffect, memo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
 import { ChatContext, ContactPanelActionsContext } from "../context/ChatContext";
@@ -26,12 +26,7 @@ const QuoteBlock = ({ replyTo, isOwn, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    className="mb-2 block w-full rounded-md border-l-[3px] px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-    style={{
-      borderColor: isOwn ? "rgba(255,255,255,0.75)" : "var(--primary-light)",
-      background: isOwn ? "rgba(255,255,255,0.12)" : "var(--subtle)",
-      color: isOwn ? "rgba(255,255,255,0.92)" : "var(--text-secondary)",
-    }}
+    className={`message-quote mb-2 block w-full rounded-md border-l-[3px] px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${isOwn ? "is-own" : ""}`}
     aria-label={`Jump to message from ${replyTo.senderName || "User"}`}
   >
     <span className="block truncate text-[11px] font-semibold">{replyTo.senderName || "User"}</span>
@@ -44,8 +39,19 @@ const QuoteBlock = ({ replyTo, isOwn, onClick }) => (
   </button>
 );
 
-const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive = false }) => {
+const Message = ({
+  message,
+  lastRead,
+  reactions: messageReactions = {},
+  isLive = false,
+  showGroupSenderName = true,
+  showGroupAvatar = true,
+  rowGap,
+  photoStack = [],
+  photoStackLastMessage,
+}) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [galleryIndex, setGalleryIndex] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.text || "");
@@ -57,6 +63,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   const reactionPickerRef = useRef(null);
   const longPressTimerRef = useRef(null);
   const pointerStartRef = useRef(null);
+  const galleryPointerRef = useRef(null);
   const [canHover, setCanHover] = useState(false);
   const [reactionPicker, setReactionPicker] = useState(null);
   const [loveBurstKey, setLoveBurstKey] = useState(0);
@@ -101,11 +108,31 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   }, [isLive, isLoveMessage, message.date, message.id, shouldReduceMotion]);
 
   const isOwn = message.senderId === currentUser.uid;
+  const stackMessages = photoStack.length > 1 ? photoStack : null;
+  const displayedStackLast = photoStackLastMessage || message;
+  const reactionMessageId = photoStackLastMessage?.id || message.id;
+  const visibleStackMessages = stackMessages?.slice(0, 3) || [];
+  const closeGallery = useCallback(() => setGalleryIndex(null), []);
+  const changeGalleryIndex = useCallback((step) => {
+    if (!stackMessages?.length) return;
+    setGalleryIndex((index) => (index + step + stackMessages.length) % stackMessages.length);
+  }, [stackMessages]);
   const senderMember = data.user?.members?.find((member) => member.uid === message.senderId) || {
     uid: message.senderId,
     displayName: message.senderName,
     photoURL: message.senderPhoto,
   };
+
+  useEffect(() => {
+    if (galleryIndex === null || !stackMessages) return undefined;
+    const handleGalleryKey = (event) => {
+      if (event.key === "Escape") closeGallery();
+      if (event.key === "ArrowRight") changeGalleryIndex(1);
+      if (event.key === "ArrowLeft") changeGalleryIndex(-1);
+    };
+    document.addEventListener("keydown", handleGalleryKey);
+    return () => document.removeEventListener("keydown", handleGalleryKey);
+  }, [changeGalleryIndex, closeGallery, galleryIndex, stackMessages]);
 
   const handleReply = () => {
     if (!message.id) return;
@@ -127,7 +154,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
     const previousOutline = target.style.outline;
     const previousOutlineOffset = target.style.outlineOffset;
     target.style.transition = "outline-color 180ms ease";
-    target.style.outline = "3px solid rgba(99,102,241,0.6)";
+    target.style.outline = "3px solid var(--primary-border)";
     target.style.outlineOffset = "2px";
     window.setTimeout(() => {
       target.style.outline = previousOutline;
@@ -146,13 +173,13 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
 
   const handleReaction = async (emoji) => {
     setReactionPicker(null);
-    if (!data.chatId || !message.id || !currentUser?.uid) return;
+    if (!data.chatId || !reactionMessageId || !currentUser?.uid) return;
     const chatRef = doc(db, "chats", data.chatId);
     const existingEmoji = messageReactions?.[currentUser.uid];
     try {
       await updateDoc(
         chatRef,
-        new FieldPath("reactions", message.id, currentUser.uid),
+        new FieldPath("reactions", reactionMessageId, currentUser.uid),
         existingEmoji === emoji ? deleteField() : emoji
       );
     } catch (error) {
@@ -198,13 +225,26 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   };
 
   const renderLoveText = () => {
-    if (!loveMatches.length) return message.text;
+    const matches = [...loveMatches.map((match) => ({ ...match, kind: "love" }))];
+    const mentionPattern = /@[A-Za-z0-9_.-]+/g;
+    let mention;
+    while ((mention = mentionPattern.exec(message.text || "")) !== null) {
+      matches.push({ index: mention.index, text: mention[0], kind: "mention" });
+    }
+    if (!matches.length) return message.text;
+    matches.sort((left, right) => left.index - right.index);
     const content = [];
     let cursor = 0;
-    loveMatches.forEach((match, index) => {
+    matches.forEach((match, index) => {
+      if (match.index < cursor) return;
       if (match.index > cursor) content.push(message.text.slice(cursor, match.index));
       content.push(
-        <span key={`${match.index}-${index}`} className={shouldReduceMotion ? "love-word-static" : "love-word-pulse"}>
+        <span
+          key={`${match.index}-${index}`}
+          className={match.kind === "mention"
+            ? "text-[var(--primary-text)]"
+            : shouldReduceMotion ? "love-word-static" : "love-word-pulse"}
+        >
           {match.text}
         </span>
       );
@@ -215,12 +255,12 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
   };
 
   let isRead = false;
-  if (isOwn && lastRead && message.status !== "sending") {
-    const msgTime = message.date?.toMillis
-      ? message.date.toMillis()
-      : (message.date instanceof Date
-        ? message.date.getTime()
-        : (typeof message.date === "number" ? message.date : Date.now()));
+  if (isOwn && lastRead && displayedStackLast.status !== "sending") {
+    const msgTime = displayedStackLast.date?.toMillis
+      ? displayedStackLast.date.toMillis()
+      : (displayedStackLast.date instanceof Date
+        ? displayedStackLast.date.getTime()
+        : (typeof displayedStackLast.date === "number" ? displayedStackLast.date : Date.now()));
     if (msgTime > 0) {
       if (data.user?.isGroup && data.user?.members) {
         isRead = data.user.members.some(
@@ -301,29 +341,22 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className={`flex items-end gap-2.5 mb-3 group relative ${isOwn ? "flex-row-reverse" : "flex-row"}`}
+      className={`message-row flex items-end gap-2.5 group relative ${isOwn ? "flex-row-reverse" : "flex-row"}`}
+      style={rowGap ? { marginBottom: rowGap } : undefined}
     >
-      {data.user?.isGroup ? (
-        <button type="button" onClick={() => openMemberPanel(senderMember)} className="mb-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label={`Open ${senderMember.displayName || "sender"} information`}>
+      {data.user?.isGroup && showGroupAvatar && !isOwn ? (
+        <button type="button" onClick={() => openMemberPanel(senderMember)} className="mb-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label={`Open ${senderMember.displayName || "sender"} information`}>
           <Avatar
-            src={isOwn ? currentUser.photoURL : (message.senderPhoto || senderMember.photoURL || data.user.photoURL)}
-            alt={isOwn ? currentUser.displayName : (message.senderName || data.user.displayName)}
-            className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-            style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+            src={message.senderPhoto || senderMember.photoURL || data.user.photoURL}
+            alt={message.senderName || data.user.displayName}
+            className="h-7 w-7 flex-shrink-0 rounded-full object-cover"
           />
         </button>
-      ) : (
-        <Avatar
-          src={isOwn ? currentUser.photoURL : (message.senderPhoto || data.user.photoURL)}
-          alt={isOwn ? currentUser.displayName : (message.senderName || data.user.displayName)}
-          className="w-7 h-7 rounded-full object-cover flex-shrink-0 mb-1"
-          style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
-        />
-      )}
+      ) : <span className="w-7 flex-shrink-0" aria-hidden="true" />}
 
-      <div className={`flex flex-col gap-1.5 max-w-[72%] sm:max-w-[65%] ${isOwn ? "items-end" : "items-start"}`}>
-        {data.user?.isGroup && (
-          <button type="button" onClick={() => openMemberPanel(senderMember)} className="self-start pl-1 text-[10px] font-medium text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+      <div className={`flex max-w-[78%] flex-col gap-1.5 ${isOwn ? "items-end" : "items-start"}`}>
+        {data.user?.isGroup && showGroupSenderName && (
+          <button type="button" onClick={() => openMemberPanel(senderMember)} className="self-start pl-1 text-xs font-semibold text-[var(--accent-name)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
             {message.senderName || (isOwn ? currentUser.displayName : "Unknown")}
           </button>
         )}
@@ -331,7 +364,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
         <div className="relative w-full">
           {!canHover && !isEditing && (
             <div
-              className={`pointer-events-none absolute left-2 top-1/2 z-0 -translate-y-1/2 rounded-full p-2 text-indigo-500 ${isOwn ? "left-auto right-2" : ""}`}
+              className={`pointer-events-none absolute left-2 top-1/2 z-0 -translate-y-1/2 rounded-full p-2 text-[var(--primary-text)] ${isOwn ? "left-auto right-2" : ""}`}
               aria-hidden="true"
             >
               <Reply size={16} />
@@ -356,7 +389,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
           }}
         >
         {isEditing ? (
-          <div className="flex items-center gap-1.5 bg-[var(--surface-3)] p-1.5 rounded-xl border border-indigo-500/50">
+          <div className="message-edit-row flex items-center gap-1.5 p-1.5">
             <input
               type="text"
               value={editText}
@@ -368,7 +401,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
             <button
               onClick={handleSaveEdit}
               disabled={savingEdit}
-              className="p-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500"
+              className="p-1 rounded-lg bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]"
               aria-label="Save edit"
             >
               <SaveIcon size={14} />
@@ -386,26 +419,22 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
             <motion.div
               animate={loveBurstKey ? { scale: [1, 1.06, 1] } : { scale: 1 }}
               transition={{ duration: 0.34, ease: "easeOut" }}
-              className={`relative px-3.5 py-2.5 text-sm leading-relaxed ${
+              className={`message-text-bubble relative max-w-full px-3.5 py-2.5 text-[15.5px] leading-relaxed ${
                 isOwn ? "msg-bubble-sent" : "msg-bubble-received"
               } ${isLoveMessage ? "love-message-bubble" : ""}`}
-              style={{ maxWidth: "100%", wordBreak: "break-word" }}
             >
               {message.replyTo && <QuoteBlock replyTo={message.replyTo} isOwn={isOwn} onClick={handleQuoteClick} />}
               {renderLoveText()}
-              <span
-                className="flex items-center gap-1 justify-end text-[10px] mt-1"
-                style={{ color: isOwn ? "rgba(255,255,255,0.85)" : "var(--bubble-received-meta)" }}
-              >
+              <span className={`message-meta mt-1 flex items-center justify-end gap-1 text-[11px] ${isOwn ? "message-meta-own" : ""}`}>
                 {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
                 {formatDate(message.date)}
                 {isOwn && (
                   message.status === "sending" ? (
                     <Clock size={12} className="opacity-75 inline-block" aria-label="Sending" />
                   ) : message.status === "failed" ? (
-                    <AlertCircle size={13} className="text-red-300 inline-block" aria-label="Failed to send" title="Failed to send" />
+                    <AlertCircle size={13} className="text-[var(--danger-text)] inline-block" aria-label="Failed to send" title="Failed to send" />
                   ) : isRead ? (
-                    <CheckCheck size={14} style={{ color: "#bae6fd" }} aria-label="Read" />
+                    <CheckCheck size={14} className="text-[var(--seen)]" aria-label="Read" />
                   ) : (
                     <Check size={14} aria-label="Sent" />
                   )
@@ -415,7 +444,41 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
           )
         )}
 
-        {message.img && (
+        {stackMessages ? (
+          <div className="relative">
+            <div className="photo-stack" aria-label={`${stackMessages.length} photos`}>
+              {visibleStackMessages.map((photo, index) => (
+                <button
+                  key={photo.id || index}
+                  type="button"
+                  className={`photo-stack-card photo-stack-card-${index}`}
+                  onClick={() => setGalleryIndex(index)}
+                  aria-label={`Open photo ${index + 1} of ${stackMessages.length}`}
+                >
+                  <img
+                    src={optimizeUrl(photo.img, 800)}
+                    alt={`${index + 1} of ${stackMessages.length}`}
+                    loading="lazy"
+                    className="h-full w-full rounded-[14px] object-cover"
+                  />
+                </button>
+              ))}
+              {stackMessages.length > 3 && (
+                <span className="photo-stack-count">+{stackMessages.length - 3} photos</span>
+              )}
+            </div>
+            <span className="photo-stack-meta">
+              {formatDate(displayedStackLast.date)}
+              {isOwn && (displayedStackLast.status === "sending"
+                ? <Clock size={12} />
+                : displayedStackLast.status === "failed"
+                ? <AlertCircle size={12} />
+                : isRead
+                ? <CheckCheck size={12} className="text-[var(--seen)]" />
+                : <Check size={12} />)}
+            </span>
+          </div>
+        ) : message.img && (
           <motion.div
             className="relative cursor-pointer overflow-hidden rounded-2xl group"
             onClick={() => setIsExpanded(!isExpanded)}
@@ -432,13 +495,9 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
               alt="attachment"
               width={typeof message.width === "number" ? message.width : undefined}
               height={typeof message.height === "number" ? message.height : undefined}
-              className={`rounded-2xl object-cover transition-all duration-300 ${
+              className={`message-image rounded-2xl object-cover transition-all duration-300 ${
                 isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
               }`}
-              style={{
-                border: "1px solid var(--border)",
-                boxShadow: "0 8px 32px var(--shadow)",
-              }}
               onError={(e) => {
                 e.currentTarget.onerror = null;
                 e.currentTarget.style.display = "none";
@@ -455,23 +514,20 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                 className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               />
               {message.hd === true && (
-                <span className="absolute left-2 top-2 rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white shadow">HD</span>
+                <span className="absolute left-2 top-2 rounded bg-[var(--primary)] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">HD</span>
               )}
             </div>
 
-            <span
-              className="absolute bottom-2 right-2 text-[10px] text-white px-2 py-0.5 rounded-full flex items-center gap-1"
-              style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
-            >
+            <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
               {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
               {formatDate(message.date)}
               {isOwn && (
                 message.status === "sending" ? (
                   <Clock size={11} className="opacity-75 inline-block" aria-label="Sending" />
                 ) : message.status === "failed" ? (
-                  <AlertCircle size={12} className="text-red-300 inline-block" aria-label="Failed to send" title="Failed to send" />
+                  <AlertCircle size={12} className="text-[var(--danger-text)] inline-block" aria-label="Failed to send" title="Failed to send" />
                 ) : isRead ? (
-                  <CheckCheck size={12} className="text-blue-300 opacity-90" />
+                  <CheckCheck size={12} className="text-[var(--seen)] opacity-90" />
                 ) : (
                   <Check size={12} className="opacity-80" />
                 )
@@ -487,7 +543,6 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                   onClick={handleDownload}
                   disabled={isDownloading}
                   className="p-2.5 rounded-xl transition-all duration-200 disabled:opacity-50"
-                  style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
                   title="Download original"
                   aria-label="Download original image"
                 >
@@ -499,7 +554,6 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                   transition={{ delay: 0.2 }}
                   onClick={handleOpenOriginal}
                   className="p-2.5 rounded-xl transition-all duration-200"
-                  style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)", color: "white" }}
                   title="Open original"
                   aria-label="Open original image"
                 >
@@ -511,8 +565,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
         )}
         {message.file?.url && (
           <div
-            className="mt-1 w-full max-w-sm overflow-hidden rounded-xl border"
-            style={{ borderColor: "var(--border)", background: "var(--surface-3)" }}
+            className="media-card mt-1 w-full max-w-sm overflow-hidden rounded-2xl border"
           >
             {message.file.mime?.startsWith("video/") ? (
               <video
@@ -557,7 +610,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
           </div>
         )}
         {Object.entries(reactionCounts).length > 0 && (
-          <div className={`flex flex-wrap gap-1 ${isOwn ? "justify-end" : "justify-start"}`}>
+          <div className={`relative z-10 -mt-3 flex flex-wrap gap-1 ${isOwn ? "justify-end" : "justify-start"}`}>
             {Object.entries(reactionCounts).map(([emoji, reaction]) => (
               <motion.button
                 key={emoji}
@@ -567,12 +620,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                 whileTap={{ scale: 0.9 }}
                 transition={{ type: "spring", stiffness: 420, damping: 22 }}
                 onClick={() => handleReaction(emoji)}
-                className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                style={{
-                  background: reaction.includesMe ? "rgba(99,102,241,0.18)" : "var(--surface-2)",
-                  borderColor: reaction.includesMe ? "var(--primary-light)" : "var(--border-light)",
-                  color: "var(--text-primary)",
-                }}
+                className={`reaction-chip ${reaction.includesMe ? "is-mine" : ""}`}
                 aria-label={`${emoji}, ${reaction.count} reactions${reaction.includesMe ? ", remove your reaction" : ", add your reaction"}`}
               >
                 <span>{emoji}</span><span>{reaction.count}</span>
@@ -588,7 +636,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
           <button
             type="button"
             onClick={(event) => openReactionPicker(event.currentTarget)}
-            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             title="React"
             aria-label="Add a reaction"
           >
@@ -597,7 +645,7 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
           <button
             type="button"
             onClick={handleReply}
-            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             title="Reply"
             aria-label="Reply to message"
           >
@@ -640,8 +688,8 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: 5 }}
             transition={{ type: "spring", stiffness: 420, damping: 24 }}
-            className="fixed z-[70] flex items-center justify-between gap-1 rounded-full border px-2 py-1.5 shadow-xl"
-            style={{ left: reactionPicker.left, top: reactionPicker.top, width: 236, background: "var(--surface-2)", borderColor: "var(--border-light)", boxShadow: "0 10px 35px var(--shadow)" }}
+            className="glass reaction-picker fixed z-[70] flex items-center justify-between gap-1 rounded-full px-2 py-1.5 shadow-xl"
+            style={{ left: reactionPicker.left, top: reactionPicker.top, width: 236 }}
             role="group"
             aria-label="Quick reactions"
           >
@@ -650,12 +698,61 @@ const Message = ({ message, lastRead, reactions: messageReactions = {}, isLive =
                 key={emoji}
                 type="button"
                 onClick={() => handleReaction(emoji)}
-                className="rounded-full p-1.5 text-lg leading-none transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="rounded-full p-1.5 text-lg leading-none transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                 aria-label={`React with ${emoji}`}
               >
                 {emoji}
               </button>
             ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {galleryIndex !== null && stackMessages && (
+          <motion.div
+            className="photo-lightbox"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeGallery}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Photo gallery"
+          >
+            <button type="button" className="photo-lightbox-close" onClick={closeGallery} aria-label="Close gallery">
+              <X size={20} />
+            </button>
+            <button
+              type="button"
+              className="photo-lightbox-arrow photo-lightbox-prev"
+              onClick={(event) => { event.stopPropagation(); changeGalleryIndex(-1); }}
+              aria-label="Previous photo"
+            >
+              ‹
+            </button>
+            <img
+              src={optimizeUrl(stackMessages[galleryIndex].img, 1600)}
+              alt={`${galleryIndex + 1} of ${stackMessages.length}`}
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => { galleryPointerRef.current = event.clientX; }}
+              onPointerUp={(event) => {
+                const start = galleryPointerRef.current;
+                if (start === null) return;
+                const delta = event.clientX - start;
+                if (Math.abs(delta) > 45) changeGalleryIndex(delta < 0 ? 1 : -1);
+                galleryPointerRef.current = null;
+              }}
+              className="photo-lightbox-image"
+            />
+            <button
+              type="button"
+              className="photo-lightbox-arrow photo-lightbox-next"
+              onClick={(event) => { event.stopPropagation(); changeGalleryIndex(1); }}
+              aria-label="Next photo"
+            >
+              ›
+            </button>
+            <span className="photo-lightbox-count">{galleryIndex + 1} / {stackMessages.length}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -695,6 +792,11 @@ const areMessagePropsEqual = (previous, next) => {
     sameDate(previousMessage.date, nextMessage.date) &&
     sameReply &&
     previous.isLive === next.isLive &&
+    previous.showGroupSenderName === next.showGroupSenderName &&
+    previous.showGroupAvatar === next.showGroupAvatar &&
+    previous.rowGap === next.rowGap &&
+    previous.photoStack === next.photoStack &&
+    previous.photoStackLastMessage === next.photoStackLastMessage &&
     sameObject(previous.lastRead, next.lastRead) &&
     sameObject(previous.reactions, next.reactions);
 };

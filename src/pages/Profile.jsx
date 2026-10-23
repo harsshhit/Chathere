@@ -1,953 +1,255 @@
-import React, { useContext, useState, useEffect } from "react";
-import { AuthContext } from "../context/AuthContext";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Mail,
-  Calendar,
-  Edit2,
-  LogOut,
-  Check,
-  X,
-  Camera,
-  ArrowLeft,
-  Bell,
-  Shield,
-  AlertTriangle,
-  Sun,
-  Moon,
-  Send,
-  Share2,
-  PlusSquare,
-  Download,
-  Volume2,
-  VolumeX,
-  Smartphone,
-  Eye,
-  EyeOff,
-  Music,
-  Info,
-} from "lucide-react";
-import { updateProfile } from "firebase/auth";
+import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { ArrowLeft, Camera, Calendar, Check, Edit2, Info, LogOut, Mail, Settings, Archive } from "lucide-react";
+import { updateProfile, signOut } from "firebase/auth";
 import { doc, updateDoc, getDoc } from "firebase/firestore";
-import { db } from "../firebase";
-import { signOut } from "firebase/auth";
-import { auth } from "../firebase";
-import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../context/AuthContext";
+import { UserChatsContext, UserDocumentContext } from "../context/ChatContext";
 import Avatar from "../components/Avatar";
 import AvatarPicker from "../components/AvatarPicker";
-import { useInstall } from "../context/InstallContext";
-import {
-  getPermissionState,
-  requestNotificationPermission,
-  notifyMessage,
-  isIOS,
-  isStandalone,
-  getNotificationSettings,
-  saveNotificationSettings,
-  playTonePreview,
-} from "../utils/notify";
-import { useTheme } from "../context/ThemeContext";
+import { SettingsGroup, SettingsRow, ScreenHeader, Section, StatCard, Sheet } from "../components/ui";
+import { auth, db } from "../firebase";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-const Profile = ({ settings = false }) => {
+const Profile = () => {
   const { currentUser, updateAuthUser } = useContext(AuthContext);
-  const { theme, setTheme } = useTheme();
-  const { canInstall, isInstalled, promptInstall, isIOS: isInstallIOS } = useInstall();
+  const userChats = useContext(UserChatsContext);
+  const userDocument = useContext(UserDocumentContext);
   const navigate = useNavigate();
-
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [isEditingBio, setIsEditingBio] = useState(false);
-  const [newDisplayName, setNewDisplayName] = useState(currentUser.displayName || "");
-  const [bio, setBio] = useState("");
-  const [newBio, setNewBio] = useState("");
+  const location = useLocation();
+  const editMode = location.pathname === "/profile/edit";
+  const reduceMotion = useReducedMotion();
+  const [nameDraft, setNameDraft] = useState(currentUser?.displayName || "");
+  const [bioDraft, setBioDraft] = useState(userDocument.bio || "");
+  const [bioTouched, setBioTouched] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [savingName, setSavingName] = useState(false);
-  const [savingBio, setSavingBio] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [permissionState, setPermissionState] = useState(() => getPermissionState());
-  const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
-  const [testNotificationSent, setTestNotificationSent] = useState(false);
-  const [notifSettings, setNotifSettings] = useState(() => getNotificationSettings());
-  const [enterToSend, setEnterToSend] = useState(() => {
-    if (typeof window === "undefined") return true;
-    const saved = window.localStorage.getItem("chathere:enterToSend");
-    if (saved === null) {
-      return !window.matchMedia("(pointer: coarse)").matches;
-    }
-    return saved === "true";
-  });
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const dirty = nameDraft.trim() !== (currentUser?.displayName || "") || bioDraft !== (userDocument.bio || "");
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("chathere:enterToSend", String(enterToSend));
-    }
-  }, [enterToSend]);
-
-  const handleUpdateNotifSetting = (key, value) => {
-    const updated = saveNotificationSettings({ [key]: value });
-    if (updated) setNotifSettings(updated);
-  };
+    setNameDraft(currentUser?.displayName || "");
+  }, [currentUser?.uid, currentUser?.displayName]);
 
   useEffect(() => {
-    setPermissionState(getPermissionState());
-    setIsIOSNonStandalone(isIOS() && !isStandalone());
-    setNotifSettings(getNotificationSettings());
-  }, []);
+    if (!editMode || !bioTouched) setBioDraft(userDocument.bio || "");
+  }, [userDocument.bio, editMode, bioTouched]);
 
   useEffect(() => {
-    const fetchBio = async () => {
-      try {
-        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setBio(data.bio || "");
-          setNewBio(data.bio || "");
+    const onPopState = () => {
+      if (editMode && dirty) {
+        if (!window.confirm("Discard your unsaved profile changes?")) {
+          navigate("/profile/edit", { replace: true });
+        } else {
+          setNameDraft(currentUser?.displayName || "");
+          setBioDraft(userDocument.bio || "");
+          setBioTouched(false);
         }
-      } catch (err) {
-        console.error("Error fetching bio:", err);
       }
     };
-    if (currentUser?.uid) fetchBio();
-  }, [currentUser?.uid]);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [currentUser?.displayName, dirty, editMode, navigate, userDocument.bio]);
 
-  const handleSaveAvatar = async (newPhotoURL) => {
-    // 1. Update Firebase Auth user
-    await updateProfile(auth.currentUser, { photoURL: newPhotoURL });
+  const chatEntries = useMemo(() => Object.entries(userChats || {}).filter(([, entry]) => entry?.userInfo), [userChats]);
+  const groupCount = chatEntries.filter(([, entry]) => entry.userInfo?.isGroup).length;
+  const profileStats = chatEntries.length ? [
+    { label: "Chats", value: chatEntries.length },
+    { label: "Groups", value: groupCount },
+  ] : [];
+  const memberSince = currentUser?.metadata?.creationTime
+    ? new Date(currentUser.metadata.creationTime).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
+    : "";
 
-    // 2. Update Firestore users/{uid}
-    await updateDoc(doc(db, "users", auth.currentUser.uid), {
-      photoURL: newPhotoURL,
-    });
-
-    // 3. Update current user's userChats entries where user info is denormalized
+  const updateAvatar = async (photoURL) => {
+    if (!auth.currentUser || !currentUser?.uid || !photoURL) return;
+    await updateProfile(auth.currentUser, { photoURL });
+    await updateDoc(doc(db, "users", currentUser.uid), { photoURL });
     try {
-      const userChatsRef = doc(db, "userChats", auth.currentUser.uid);
-      const userChatsSnap = await getDoc(userChatsRef);
-      if (userChatsSnap.exists()) {
-        const chatsData = userChatsSnap.data();
+      const userChatsRef = doc(db, "userChats", currentUser.uid);
+      const snapshot = await getDoc(userChatsRef);
+      if (snapshot.exists()) {
         const updates = {};
-        Object.entries(chatsData).forEach(([chatId, chatEntry]) => {
-          if (chatEntry?.userInfo?.uid === auth.currentUser.uid) {
-            updates[`${chatId}.userInfo.photoURL`] = newPhotoURL;
-          }
+        Object.entries(snapshot.data() || {}).forEach(([chatId, chatEntry]) => {
+          if (chatEntry?.userInfo?.uid === currentUser.uid) updates[`${chatId}.userInfo.photoURL`] = photoURL;
         });
-        if (Object.keys(updates).length > 0) {
-          await updateDoc(userChatsRef, updates);
-        }
+        if (Object.keys(updates).length) await updateDoc(userChatsRef, updates);
       }
-    } catch (e) {
-      console.warn("Could not update userChats entry:", e);
+    } catch (cause) {
+      console.warn("Could not update userChats entry:", cause);
     }
-
-    // 4. Update AuthContext state immediately without reload
-    if (updateAuthUser) {
-      updateAuthUser({ photoURL: newPhotoURL });
-    }
+    updateAuthUser?.({ photoURL });
   };
 
-  const handleNameUpdate = async () => {
-    if (!newDisplayName.trim() || newDisplayName.length < 2) {
-      alert("Display name must be at least 2 characters.");
+  const saveProfile = async () => {
+    const displayName = nameDraft.trim();
+    if (displayName.length < 2) {
+      setError("Display name must be at least 2 characters.");
       return;
     }
-    setSavingName(true);
+    if (!auth.currentUser || !currentUser?.uid) return;
+    setSaving(true);
+    setError("");
     try {
-      await updateProfile(auth.currentUser, { displayName: newDisplayName.trim() });
-      await updateDoc(doc(db, "users", currentUser.uid), {
-        displayName: newDisplayName.trim(),
-      });
-      if (updateAuthUser) {
-        updateAuthUser({ displayName: newDisplayName.trim() });
+      await updateProfile(auth.currentUser, { displayName });
+      await updateDoc(doc(db, "users", currentUser.uid), { displayName, bio: bioDraft.trim() });
+      updateAuthUser?.({ displayName });
+      setBioTouched(false);
+      if (location.state?.profileEdit && window.history.state?.idx > 0) navigate(-1);
+      else navigate("/profile", { replace: true });
+    } catch (cause) {
+      console.error("Could not update profile:", cause);
+      setError("Could not save your profile. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closeEdit = useCallback(() => {
+    if (dirty && !window.confirm("Discard your unsaved profile changes?")) return;
+    setNameDraft(currentUser?.displayName || "");
+    setBioDraft(userDocument.bio || "");
+    setBioTouched(false);
+    if (location.state?.profileEdit && window.history.state?.idx > 0) navigate(-1);
+    else navigate("/profile", { replace: true });
+  }, [currentUser?.displayName, dirty, location.state?.profileEdit, navigate, userDocument.bio]);
+  useEffect(() => {
+    if (!editMode || showAvatarPicker || showLogoutConfirm) return undefined;
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEdit();
       }
-      setIsEditingName(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingName(false);
-    }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [closeEdit, editMode, showAvatarPicker, showLogoutConfirm]);
+  const openEdit = () => navigate("/profile/edit", { state: { profileEdit: true } });
+  const backToChats = () => {
+    if (location.state?.mobileTabSwitch && window.history.state?.idx > 0) navigate(-1);
+    else navigate("/", { replace: true });
   };
 
-  const handleBioUpdate = async () => {
-    setSavingBio(true);
+  const signOutUser = async () => {
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), { bio: newBio.trim() });
-      setBio(newBio.trim());
-      setIsEditingBio(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSavingBio(false);
-    }
-  };
-
-  const handleToggleNotifications = async () => {
-    if (isIOSNonStandalone) return;
-    if (permissionState === "granted" || permissionState === "denied" || permissionState === "unsupported") {
-      return;
-    }
-    await requestNotificationPermission(currentUser);
-    setPermissionState(getPermissionState());
-  };
-
-  const handleSendTestNotification = async () => {
-    try {
-      await notifyMessage({
-        chatId: "test-preview",
-        title: "ChatHere Test",
-        body: "Sample notification! Sound, vibration, and service worker are functioning properly.",
-        icon: "/icon-192.png",
-      });
-      setTestNotificationSent(true);
-      setTimeout(() => setTestNotificationSent(false), 3000);
-    } catch (err) {
-      console.warn("Failed to send test notification:", err);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
+      closeSignOut();
       await signOut(auth);
       navigate("/login");
-    } catch (err) {
-      console.error(err);
+    } catch (cause) {
+      console.error("Could not sign out:", cause);
+      setError("Could not sign out. Please try again.");
     }
   };
 
-  const memberSince = currentUser?.metadata?.creationTime
-    ? new Date(currentUser.metadata.creationTime).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
-    : "Recently";
-
-  const handleBack = () => {
-    if (window.history.state && window.history.state.idx > 0) {
-      navigate(-1);
-    } else {
-      navigate("/", { replace: true });
+  const copyValue = async (value) => {
+    try {
+      await navigator.clipboard.writeText(String(value));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch (cause) {
+      console.error("Could not copy profile information:", cause);
     }
   };
 
-  return (
-    <div
-      className="min-h-[100vh] min-h-[100dvh] flex flex-col"
-      style={{ background: "var(--surface)" }}
-    >
-      <div
-        className="px-4 py-3 flex items-center justify-between flex-shrink-0 safe-top"
-        style={{
-          background: "var(--surface-2)",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleBack}
-            className="icon-btn -ml-1"
-            title="Back"
-            aria-label="Back"
-            style={{ touchAction: "manipulation" }}
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <span className="brand-logo text-xl">{settings ? "Settings" : "ChatHere"}</span>
-        </div>
-      </div>
+  const setOverlay = (open) => window.dispatchEvent(new CustomEvent("chathere:mobile-overlay", { detail: { open } }));
+  const openAvatarPicker = () => { setShowAvatarPicker(true); setOverlay(true); };
+  const closeAvatarPicker = () => { setShowAvatarPicker(false); setOverlay(false); };
+  const openSignOut = () => { setShowLogoutConfirm(true); setOverlay(true); };
+  const closeSignOut = () => { setShowLogoutConfirm(false); setOverlay(false); };
 
-      <div className="flex-1 flex items-start justify-center px-4 py-8 sm:py-12 overflow-y-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-          className="w-full max-w-md"
-        >
-          <div className="glass-card p-6 sm:p-8">
-            {!settings && <>
-            <div className="flex justify-center mb-6">
-              <div className="relative group">
-                <motion.div
-                  className="w-24 h-24 rounded-3xl object-cover overflow-hidden"
-                  whileHover={{ scale: 1.03 }}
-                  style={{
-                    border: "2px solid rgba(99,102,241,0.5)",
-                    boxShadow: "0 0 40px rgba(99,102,241,0.25)",
-                    background: "var(--surface)",
-                  }}
-                >
-                  <Avatar
-                    src={currentUser.photoURL}
-                    alt={currentUser.displayName}
-                    className="w-full h-full object-cover"
-                  />
-                </motion.div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAvatarPicker(true)}
-                  className="absolute inset-0 rounded-3xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer"
-                  style={{ background: "rgba(0,0,0,0.55)" }}
-                  title="Change photo"
-                  aria-label="Change photo"
-                >
-                  <Camera size={22} className="text-white" />
-                </button>
-              </div>
-            </div>
-            <div className="flex justify-center -mt-3 mb-6">
-              <button
-                type="button"
-                onClick={() => setShowAvatarPicker(true)}
-                className="text-xs font-semibold text-indigo-500 hover:text-indigo-400 transition-colors"
-                style={{ touchAction: "manipulation" }}
-              >
-                Change photo
-              </button>
-            </div>
-            </>}
-
-            <div className="space-y-4">
-              {!settings && <div>
-                <label
-                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
-                >
-                  Display name
-                </label>
-                <AnimatePresence mode="wait">
-                  {isEditingName ? (
-                    <motion.div
-                      key="editing-name"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex gap-2"
-                    >
-                      <input
-                        type="text"
-                        value={newDisplayName}
-                        onChange={(e) => setNewDisplayName(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleNameUpdate()}
-                        className="flex-1 px-3 py-2 text-sm rounded-xl outline-none"
-                        style={{
-                          background: "var(--surface-3)",
-                          border: "1px solid rgba(99,102,241,0.5)",
-                          color: "var(--text-primary)",
-                        }}
-                        autoFocus
-                      />
-                      <button
-                        onClick={handleNameUpdate}
-                        disabled={savingName}
-                        className="p-2 rounded-xl"
-                        style={{ background: "var(--primary)", color: "white" }}
-                      >
-                        <Check size={16} />
-                      </button>
-                      <button
-                        onClick={() => { setIsEditingName(false); setNewDisplayName(currentUser.displayName || ""); }}
-                        className="p-2 rounded-xl"
-                        style={{ background: "var(--surface-4)", color: "var(--text-muted)" }}
-                      >
-                        <X size={16} />
-                      </button>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="display-name"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                      style={{
-                        background: "var(--surface-3)",
-                        border: "1px solid var(--border)",
-                      }}
-                    >
-                      <span className="text-sm font-medium text-[var(--text-primary)]">
-                        {currentUser.displayName}
-                      </span>
-                      <button
-                        onClick={() => setIsEditingName(true)}
-                        className="icon-btn p-1.5 ml-2 flex-shrink-0"
-                        title="Edit name"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>}
-
-              {!settings && <div>
-                <label
-                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
-                >
-                  Email
-                </label>
-                <div
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                  style={{
-                    background: "var(--surface-3)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  <Mail size={14} style={{ color: "var(--text-muted)" }} className="flex-shrink-0" />
-                  <span className="text-sm text-[var(--text-secondary)]">
-                    {currentUser.email}
-                  </span>
-                </div>
-              </div>}
-
-              {!settings && <div>
-                <label
-                  className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]"
-                >
-                  Bio
-                </label>
-                <AnimatePresence mode="wait">
-                  {isEditingBio ? (
-                    <motion.div
-                      key="editing-bio"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="space-y-2"
-                    >
-                      <textarea
-                        value={newBio}
-                        onChange={(e) => setNewBio(e.target.value)}
-                        placeholder="Write something about yourself…"
-                        rows={3}
-                        maxLength={140}
-                        className="w-full px-3 py-2 text-sm rounded-xl outline-none resize-none"
-                        style={{
-                          background: "var(--surface-3)",
-                          border: "1px solid rgba(99,102,241,0.5)",
-                          color: "var(--text-primary)",
-                        }}
-                        autoFocus
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleBioUpdate}
-                          disabled={savingBio}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl"
-                          style={{ background: "var(--primary)", color: "white" }}
-                        >
-                          <Check size={13} />
-                          Save
-                        </button>
-                        <button
-                          onClick={() => { setIsEditingBio(false); setNewBio(bio); }}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl"
-                          style={{ background: "var(--surface-4)", color: "var(--text-muted)" }}
-                        >
-                          <X size={13} />
-                          Cancel
-                        </button>
-                      </div>
-                      <p className="text-right text-[11px] text-[var(--text-muted)]" aria-live="polite">{newBio.length}/140</p>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="display-bio"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="flex items-start justify-between px-3 py-2.5 rounded-xl"
-                      style={{
-                        background: "var(--surface-3)",
-                        border: "1px solid var(--border)",
-                      }}
-                    >
-                      <span
-                        className="text-sm"
-                        style={{ color: bio ? "var(--text-secondary)" : "var(--text-muted)" }}
-                      >
-                        {bio || "No bio yet"}
-                      </span>
-                      <button
-                        onClick={() => setIsEditingBio(true)}
-                        className="icon-btn p-1.5 ml-2 flex-shrink-0"
-                        title="Edit bio"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>}
-
-            {settings && <>
-              <div>
-                <label className="block text-[10px] font-bold mb-1 uppercase tracking-wider text-[var(--text-muted)]">
-                  Preferences & Appearance
-                </label>
-                <div className="space-y-2">
-                  <div
-                    className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
-                  >
-                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                      {theme === "dark" ? (
-                        <Moon size={15} className="text-indigo-400" />
-                      ) : (
-                        <Sun size={15} className="text-amber-500" />
-                      )}
-                      <span>Appearance</span>
-                    </div>
-
-                    <div
-                      role="radiogroup"
-                      aria-label="Theme selector"
-                      className="flex items-center p-1 rounded-lg gap-1 relative"
-                      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
-                    >
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={theme === "light"}
-                        aria-label="Light theme"
-                        onClick={() => setTheme("light")}
-                        className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${theme === "light"
-                            ? "text-[var(--primary-light)]"
-                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                          }`}
-                      >
-                        <Sun size={13} />
-                        <span>Light</span>
-                        {theme === "light" && (
-                          <motion.div
-                            layoutId="theme-indicator"
-                            className="absolute inset-0 rounded-md -z-10 shadow-sm"
-                            style={{
-                              background: "var(--surface-3)",
-                              border: "1px solid var(--border-light)",
-                            }}
-                            transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                          />
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={theme === "dark"}
-                        aria-label="Dark theme"
-                        onClick={() => setTheme("dark")}
-                        className={`relative z-10 flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${theme === "dark"
-                            ? "text-[var(--primary-light)]"
-                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                          }`}
-                      >
-                        <Moon size={13} />
-                        <span>Dark</span>
-                        {theme === "dark" && (
-                          <motion.div
-                            layoutId="theme-indicator"
-                            className="absolute inset-0 rounded-md -z-10 shadow-sm"
-                            style={{
-                              background: "var(--surface-4)",
-                              border: "1px solid var(--border-light)",
-                            }}
-                            transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                          />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div
-                    className="p-3.5 rounded-xl space-y-3 transition-colors"
-                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
-                          <Send size={13} className="text-indigo-400" />
-                          <span>Enter to send</span>
-                        </div>
-                        <div className="text-[11px] text-[var(--text-muted)]">
-                          {enterToSend ? "Press Enter to send a message" : "Press Enter for a newline; send with Ctrl/Cmd + Enter"}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setEnterToSend((current) => !current)}
-                        className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
-                          enterToSend ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
-                        }`}
-                        aria-label="Toggle Enter to send"
-                      >
-                        <motion.div
-                          animate={{ x: enterToSend ? 16 : 0 }}
-                          transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                          className="w-4 h-4 rounded-full bg-white shadow-sm"
-                        />
-                      </button>
-                    </div>
-
-                    {/* Master Permission Header */}
-                    <div
-                      onClick={handleToggleNotifications}
-                      className={`flex items-center justify-between ${
-                        permissionState === "default" && !isIOSNonStandalone
-                          ? "cursor-pointer hover:opacity-90"
-                          : ""
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
-                        <Bell size={16} className="text-indigo-400" />
-                        <span>Message Notifications</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isIOSNonStandalone ? (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">
-                            PWA Required
-                          </span>
-                        ) : permissionState === "granted" ? (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-500/20 text-[var(--success-text)]">
-                            Enabled
-                          </span>
-                        ) : permissionState === "denied" ? (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500/20 text-red-400">
-                            Blocked
-                          </span>
-                        ) : permissionState === "unsupported" ? (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--surface-4)] text-[var(--text-muted)]">
-                            Not supported
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleToggleNotifications}
-                            className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-sm"
-                          >
-                            Enable
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Contextual hints depending on real permission state */}
-                    {isIOSNonStandalone ? (
-                      <div className="text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border)] leading-relaxed">
-                        On iPhone, add ChatHere to your Home Screen to get notifications: tap <Share2 size={12} className="inline text-indigo-400 mx-0.5" /> Share &gt; <PlusSquare size={12} className="inline text-indigo-400 mx-0.5" /> Add to Home Screen.
-                      </div>
-                    ) : permissionState === "denied" ? (
-                      <div className="text-xs text-red-400/90 pt-2 border-t border-[var(--border)] leading-relaxed">
-                        Notifications are blocked by your browser. To unblock, tap the lock/tune icon in your browser address bar and allow notifications for this site.
-                      </div>
-                    ) : permissionState === "unsupported" ? (
-                      <div className="text-xs text-[var(--text-muted)] pt-2 border-t border-[var(--border)] leading-relaxed">
-                        Your browser does not support web notifications or service workers.
-                      </div>
-                    ) : null}
-
-                    {/* Notification Preferences Controls */}
-                    <div className="pt-2.5 border-t border-[var(--border)] space-y-3">
-                      {/* Option 1: Notification Sound Toggle */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
-                            {notifSettings.sound ? (
-                              <Volume2 size={13} className="text-indigo-400" />
-                            ) : (
-                              <VolumeX size={13} className="text-[var(--text-muted)]" />
-                            )}
-                            <span>Notification Sound</span>
-                          </div>
-                          <div className="text-[11px] text-[var(--text-muted)]">
-                            Play sound chime on incoming messages
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateNotifSetting("sound", !notifSettings.sound)}
-                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
-                            notifSettings.sound ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
-                          }`}
-                          aria-label="Toggle notification sound"
-                        >
-                          <motion.div
-                            animate={{ x: notifSettings.sound ? 16 : 0 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                            className="w-4 h-4 rounded-full bg-white shadow-sm"
-                          />
-                        </button>
-                      </div>
-
-                      {/* Tone Selector (visible if sound enabled) */}
-                      {notifSettings.sound && (
-                        <div className="pl-5 space-y-1.5">
-                          <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-                            <span className="flex items-center gap-1">
-                              <Music size={11} className="text-indigo-400" />
-                              <span>Alert Tone</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => playTonePreview(notifSettings.tone)}
-                              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium"
-                            >
-                              ▶ Preview Tone
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-4 gap-1.5">
-                            {[
-                              { id: "chime", label: "Chime" },
-                              { id: "ping", label: "Ping" },
-                              { id: "pop", label: "Pop" },
-                              { id: "bell", label: "Bell" },
-                            ].map((tone) => (
-                              <button
-                                key={tone.id}
-                                type="button"
-                                onClick={() => {
-                                  handleUpdateNotifSetting("tone", tone.id);
-                                  playTonePreview(tone.id);
-                                }}
-                                className={`py-1 text-[11px] font-medium rounded-lg border transition-all ${
-                                  notifSettings.tone === tone.id
-                                    ? "bg-indigo-600/20 border-indigo-500 text-indigo-300 font-semibold"
-                                    : "bg-[var(--surface-2)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                                }`}
-                              >
-                                {tone.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Option 2: Vibration Haptics Toggle */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
-                            <Smartphone size={13} className="text-indigo-400" />
-                            <span>Vibrate on Incoming Message</span>
-                          </div>
-                          <div className="text-[11px] text-[var(--text-muted)]">
-                            Haptic vibration on mobile devices
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateNotifSetting("vibrate", !notifSettings.vibrate)}
-                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
-                            notifSettings.vibrate ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
-                          }`}
-                          aria-label="Toggle vibration"
-                        >
-                          <motion.div
-                            animate={{ x: notifSettings.vibrate ? 16 : 0 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                            className="w-4 h-4 rounded-full bg-white shadow-sm"
-                          />
-                        </button>
-                      </div>
-
-                      {/* Option 3: Message Content Privacy Preview Toggle */}
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
-                            {notifSettings.showPreview ? (
-                              <Eye size={13} className="text-indigo-400" />
-                            ) : (
-                              <EyeOff size={13} className="text-[var(--text-muted)]" />
-                            )}
-                            <span>Message Preview</span>
-                          </div>
-                          <div className="text-[11px] text-[var(--text-muted)]">
-                            {notifSettings.showPreview
-                              ? "Show sender name & message snippet"
-                              : "Hide message text for privacy (displays 'New message')"}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateNotifSetting("showPreview", !notifSettings.showPreview)}
-                          className={`relative w-9 h-5 rounded-full transition-colors flex items-center p-0.5 ${
-                            notifSettings.showPreview ? "bg-indigo-600" : "bg-[var(--surface-4)] border border-[var(--border)]"
-                          }`}
-                          aria-label="Toggle message preview"
-                        >
-                          <motion.div
-                            animate={{ x: notifSettings.showPreview ? 16 : 0 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                            className="w-4 h-4 rounded-full bg-white shadow-sm"
-                          />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Test Notification Action */}
-                    {permissionState === "granted" && (
-                      <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between">
-                        <span className="text-xs text-[var(--text-muted)]">
-                          Test alert, chime & vibration
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleSendTestNotification}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors shadow-sm"
-                          style={{ touchAction: "manipulation" }}
-                        >
-                          <Send size={11} />
-                          <span>{testNotificationSent ? "Notification sent!" : "Send test notification"}</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Mobile Background Tips Card */}
-                    <div
-                      className="p-2.5 rounded-lg text-[11px] leading-relaxed flex items-start gap-2"
-                      style={{
-                        background: "rgba(99, 102, 241, 0.08)",
-                        border: "1px solid rgba(99, 102, 241, 0.2)",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      <Info size={14} className="text-indigo-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="text-[var(--text-primary)]">Mobile Chrome Tip:</strong> To keep notifications popping up even when Chrome is minimized or phone is locked, ensure Chrome’s battery is set to <strong>Unrestricted / Optimized</strong> in phone settings (Settings &gt; Apps &gt; Chrome &gt; Battery).
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* PWA App Installation Option */}
-                  <div
-                    className="p-3 rounded-xl space-y-2 transition-colors"
-                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                        <Download size={15} className="text-indigo-400" />
-                        <span>Install ChatHere App</span>
-                      </div>
-                      {isInstalled ? (
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-500/20 text-[var(--success-text)]">
-                          Installed
-                        </span>
-                      ) : canInstall && !isInstallIOS ? (
-                        <button
-                          type="button"
-                          onClick={promptInstall}
-                          className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-sm"
-                          style={{ touchAction: "manipulation" }}
-                        >
-                          Install App
-                        </button>
-                      ) : isInstallIOS ? (
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">
-                          iOS PWA
-                        </span>
-                      ) : (
-                        <span className="text-xs text-[var(--text-muted)]">Web Version</span>
-                      )}
-                    </div>
-
-                    {!isInstalled && isInstallIOS && (
-                      <div className="text-xs text-[var(--text-muted)] pt-1 border-t border-[var(--border)] leading-relaxed">
-                        On iPhone: tap <Share2 size={12} className="inline text-indigo-400 mx-0.5" /> Share &gt; <PlusSquare size={12} className="inline text-indigo-400 mx-0.5" /> Add to Home Screen.
-                      </div>
-                    )}
-                  </div>
-
-                  <div
-                    className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                    style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
-                  >
-                    <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                      <Shield size={15} className="text-indigo-400" />
-                      <span>Encryption & Privacy</span>
-                    </div>
-                    <span className="text-xs text-indigo-400 font-semibold">Active</span>
-                  </div>
-                </div>
-              </div>
-            </>}
-
-            {!settings && <>
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}>
-                <Calendar size={14} style={{ color: "var(--text-muted)" }} className="flex-shrink-0" />
-                <span className="text-sm text-[var(--text-secondary)]">
-                  Member since {memberSince}
-                </span>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setShowLogoutConfirm(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
-                  style={{
-                    background: "rgba(239,68,68,0.08)",
-                    border: "1px solid rgba(239,68,68,0.2)",
-                    color: "#f87171",
-                  }}
-                >
-                  <LogOut size={16} />
-                  Sign out
-                </button>
-              </div>
-            </>}
-            </div>
+  return <main data-main-scroll className="ember-bg relative h-full overflow-y-auto overscroll-contain tab-scroll-padding">
+    <div className="mx-auto w-full max-w-[640px] pb-6">
+      <div aria-hidden={editMode}>
+        <ScreenHeader action={<button type="button" onClick={openEdit} className="icon-btn-glass" aria-label="Edit profile"><Edit2 size={18} /></button>}>
+          <button type="button" onClick={backToChats} className="desktop-profile-back icon-btn-glass" aria-label="Back to chats"><ArrowLeft size={19} /></button>
+        </ScreenHeader>
+        {error && <p role="alert" className="mx-6 mb-3 text-sm text-[var(--danger-text)]">{error}</p>}
+        <section className="px-5 pb-5 pt-4 text-center">
+          <div className="relative mx-auto mb-3 h-[104px] w-[104px] rounded-full border-2 border-[var(--border-strong)]">
+            <Avatar src={currentUser?.photoURL} name={currentUser?.displayName || currentUser?.email || "Profile"} size={100} className="h-full w-full rounded-full" />
+            <button type="button" onClick={openAvatarPicker} className="absolute bottom-0 right-0 inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-[var(--bg)] bg-[var(--primary)] text-[var(--on-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label="Change profile photo"><Camera size={18} /></button>
           </div>
-        </motion.div>
-      </div>
+          <h2 className="break-words text-[22px] font-bold leading-tight text-[var(--text-1)]">{currentUser?.displayName || "Profile"}</h2>
+          <p className="mt-1 truncate text-sm text-[var(--text-2)]">{currentUser?.email || userDocument.bio || ""}</p>
+          <button type="button" onClick={openEdit} className="ember-primary-action mt-4 min-h-11 rounded-full px-5 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">Edit profile</button>
+        </section>
 
+        {profileStats.length > 0 && <section className={`mx-4 mb-5 grid gap-2 ${profileStats.length === 1 ? "grid-cols-1" : "grid-cols-2"}`} aria-label="Profile statistics">
+          {profileStats.map((stat) => <StatCard key={stat.label} {...stat} />)}
+        </section>}
+
+        <Section title="Personal information">
+          <SettingsGroup>
+            {userDocument.bio && <SettingsRow icon={Info} label="About" value={userDocument.bio} chevron={false} onClick={() => copyValue(userDocument.bio)} />}
+            {currentUser?.email && <SettingsRow icon={Mail} label="Email" value={currentUser.email} chevron={false} onClick={() => copyValue(currentUser.email)} />}
+            {memberSince && <SettingsRow icon={Calendar} label="Joined" value={memberSince} chevron={false} onClick={() => copyValue(memberSince)} />}
+            {!userDocument.bio && !currentUser?.email && !memberSince && <p className="px-3 py-4 text-sm text-[var(--text-2)]">No profile information available yet.</p>}
+          </SettingsGroup>
+        </Section>
+
+        <Section title="Quick links">
+          <SettingsGroup>
+            <SettingsRow icon={Settings} label="Settings" onClick={() => navigate("/settings", { replace: true, state: location.state?.mobileTabSwitch ? { mobileTabSwitch: true } : null })} />
+            <SettingsRow icon={Archive} label="Archived chats" onClick={() => {
+              navigate("/", { replace: true, state: location.state?.mobileTabSwitch ? { mobileTabSwitch: true } : null });
+              window.setTimeout(() => window.dispatchEvent(new Event("chathere:show-archived")), 0);
+            }} />
+          </SettingsGroup>
+        </Section>
+
+        <Section title="Account">
+          <SettingsGroup><SettingsRow icon={LogOut} label="Sign out" danger onClick={openSignOut} /></SettingsGroup>
+        </Section>
+      </div>
       <AnimatePresence>
-        {showLogoutConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: "var(--overlay)", backdropFilter: "blur(8px)" }}
-            onClick={() => setShowLogoutConfirm(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-card p-6 max-w-sm w-full text-center"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-3 border border-red-500/20">
-                <AlertTriangle size={24} />
-              </div>
-              <h3 className="text-lg font-bold mb-1" style={{ color: "var(--text-primary)" }}>Confirm Sign Out</h3>
-              <p className="text-xs mb-5" style={{ color: "var(--text-muted)" }}>
-                Are you sure you want to sign out of ChatHere?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowLogoutConfirm(false)}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors"
-                  style={{ background: "var(--surface-3)", color: "var(--text-secondary)" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
-                >
-                  Sign Out
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
+        {editMode && <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Edit profile"
+          className="profile-edit-screen ember-bg"
+          initial={reduceMotion ? false : { opacity: 0, x: "100%" }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={reduceMotion ? undefined : { opacity: 0, x: "100%" }}
+          transition={{ duration: reduceMotion ? 0 : .24, ease: "easeOut" }}
+        >
+          <div className="mx-auto w-full max-w-[640px] pb-6">
+            <ScreenHeader title="Edit profile">
+              <button type="button" onClick={closeEdit} className="icon-btn-glass" aria-label="Back to profile"><ArrowLeft size={19} /></button>
+            </ScreenHeader>
+            <Section title="Profile details">
+              <SettingsGroup className="p-4">
+                <label className="profile-field-label" htmlFor="profile-name">Display name</label>
+                <input id="profile-name" className="profile-field" maxLength={80} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveProfile()} autoComplete="name" autoFocus />
+                <label className="profile-field-label mt-4" htmlFor="profile-about">About</label>
+                <textarea id="profile-about" className="profile-field min-h-28 resize-y" value={bioDraft} onChange={(event) => { setBioTouched(true); setBioDraft(event.target.value); }} maxLength={140} placeholder="Write something about yourself" />
+                <p className="mt-1 text-right text-xs text-[var(--text-2)]" aria-live="polite">{bioDraft.length}/140</p>
+                {error && <p role="alert" className="mt-2 text-sm text-[var(--danger-text)]">{error}</p>}
+                <div className="mt-4 flex gap-2">
+                  <button type="button" onClick={closeEdit} className="chip min-h-11 flex-1 justify-center">Cancel</button>
+                  <button type="button" onClick={saveProfile} disabled={saving} className="ember-primary-action min-h-11 flex-1 rounded-full px-4 text-sm font-semibold disabled:opacity-60">
+                    <Check size={16} className="mr-1 inline" />{saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                <button type="button" onClick={openAvatarPicker} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-[var(--border)] text-sm text-[var(--text-1)]"><Camera size={17} />Change profile photo</button>
+              </SettingsGroup>
+            </Section>
+          </div>
+        </motion.div>}
       </AnimatePresence>
-      {/* Avatar Picker Modal */}
-      <AvatarPicker
-        isOpen={showAvatarPicker}
-        onClose={() => setShowAvatarPicker(false)}
-        currentPhotoURL={currentUser?.photoURL}
-        displayName={currentUser?.displayName}
-        onSave={handleSaveAvatar}
-      />
     </div>
-  );
+
+    {copied && <div role="status" className="fixed bottom-24 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-[var(--surface-3)] px-3 py-2 text-xs font-medium text-[var(--text-1)] shadow-lg"><Check size={13} className="mr-1 inline" />Copied</div>}
+    <AvatarPicker isOpen={showAvatarPicker} onClose={closeAvatarPicker} currentPhotoURL={currentUser?.photoURL} displayName={currentUser?.displayName} onSave={updateAvatar} />
+    <Sheet open={showLogoutConfirm} onClose={closeSignOut} title="Sign out?">
+      <p className="py-2 text-sm text-[var(--text-2)]">Are you sure you want to sign out of ChatHere?</p>
+      <div className="mt-3 flex gap-2">
+        <button type="button" onClick={closeSignOut} className="chip min-h-11 flex-1 justify-center">Cancel</button>
+        <button type="button" onClick={signOutUser} className="min-h-11 flex-1 rounded-full bg-[var(--danger)] text-sm font-semibold text-[var(--on-danger)]">Sign out</button>
+      </div>
+    </Sheet>
+  </main>;
 };
 
 export default Profile;

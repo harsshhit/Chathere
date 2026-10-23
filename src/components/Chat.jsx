@@ -1,5 +1,5 @@
 import React, { useContext } from "react";
-import { ArrowLeft, MessageSquare, MessageSquareOff } from "lucide-react";
+import { ArrowLeft, MessageSquare, MessageSquareOff, MoreHorizontal, Search } from "lucide-react";
 import { motion } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
 import Messages from "./Messages";
@@ -8,15 +8,20 @@ import { ChatContext, ContactPanelContext, ContactPanelActionsContext } from "..
 import Avatar from "./Avatar";
 import ContactPanel from "./ContactPanel";
 
+const formatLastSeen = (value) => {
+  const date = value?.toDate
+    ? value.toDate()
+    : new Date(value?.seconds ? value.seconds * 1000 : value);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : `last seen ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+};
+
 const ChatSkeleton = ({ onBack }) => (
-  <div className="h-full flex flex-col" style={{ background: "var(--surface)" }}>
+  <div className="ember-bg flex h-full flex-col">
     {/* Skeleton Header */}
     <div
-      className="flex items-center justify-between px-4 py-3 flex-shrink-0 safe-top"
-      style={{
-        background: "var(--surface-2)",
-        borderBottom: "1px solid var(--border)",
-      }}
+      className="glass flex flex-shrink-0 items-center justify-between px-4 py-3"
     >
       <div className="flex items-center gap-3">
         <button
@@ -26,7 +31,7 @@ const ChatSkeleton = ({ onBack }) => (
         >
           <ArrowLeft size={20} />
         </button>
-        <div className="w-10 h-10 rounded-2xl bg-[var(--surface-3)] animate-pulse" />
+        <div className="h-9 w-9 rounded-full bg-[var(--surface-3)] animate-pulse" />
         <div className="space-y-1.5">
           <div className="w-28 h-3.5 rounded-md bg-[var(--surface-3)] animate-pulse" />
           <div className="w-16 h-2.5 rounded-md bg-[var(--surface-3)] animate-pulse" />
@@ -52,8 +57,7 @@ const ChatSkeleton = ({ onBack }) => (
 
     {/* Skeleton Input */}
     <div
-      className="px-4 py-3 flex-shrink-0 safe-bottom"
-      style={{ borderTop: "1px solid var(--border)", background: "var(--surface-2)" }}
+      className="glass mx-3 mb-3 rounded-full"
     >
       <div className="h-10 rounded-full bg-[var(--surface-3)] animate-pulse" />
     </div>
@@ -61,7 +65,7 @@ const ChatSkeleton = ({ onBack }) => (
 );
 
 const ChatNotFound = ({ onBack }) => (
-  <div className="h-full flex flex-col items-center justify-center p-6 text-center" style={{ background: "var(--surface)" }}>
+  <div className="ember-bg flex h-full flex-col items-center justify-center p-6 text-center">
     <div
       className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
       style={{ background: "var(--surface-3)", border: "1px solid var(--border)" }}
@@ -76,7 +80,7 @@ const ChatNotFound = ({ onBack }) => (
     </p>
     <button
       onClick={onBack}
-      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors"
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors"
       style={{ touchAction: "manipulation" }}
     >
       <ArrowLeft size={14} /> Back to Chats
@@ -109,7 +113,7 @@ const Chat = () => {
       if (!target) return;
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       const previousOutline = target.style.outline;
-      target.style.outline = "3px solid rgba(99,102,241,0.75)";
+      target.style.outline = "3px solid var(--primary-border)";
       window.setTimeout(() => { target.style.outline = previousOutline; }, 1400);
     }, 80);
   };
@@ -131,51 +135,68 @@ const Chat = () => {
       transition={{ duration: 0.2 }}
       className="h-full flex flex-row flex-1 min-h-0 w-full overflow-hidden"
       style={{
-        background: "var(--surface)",
+        background: "var(--wallpaper)",
         height: "var(--app-height, 100dvh)",
       }}
     >
       {hasChatTarget && data.user ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div
-            className="flex items-center justify-between px-4 py-3 shrink-0 safe-top"
-            style={{
-              background: "var(--surface-2)",
-              borderBottom: "1px solid var(--border)",
-            }}
-          >
+          <div className="glass chat-header safe-top flex shrink-0 items-center justify-between gap-2 px-3 py-2.5">
             <div className="flex items-center gap-3">
               <button
-                className="md:hidden icon-btn -ml-1 mr-1"
+                className="md:hidden icon-btn-glass -ml-1"
                 onClick={handleBack}
                 aria-label="Back to chats"
-                style={{ touchAction: "manipulation" }}
               >
-                <ArrowLeft size={20} />
+                <ArrowLeft size={19} />
               </button>
 
               <button
                 type="button"
                 onClick={() => openContactPanel(data.user)}
-                style={{ touchAction: "manipulation" }}
                 aria-label={`Open ${data.user?.displayName || "chat"} information`}
-                className="flex items-center gap-3 group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="flex min-w-0 items-center gap-2.5 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
               >
                 <Avatar
                   src={data.user?.photoURL}
                   name={data.user?.displayName}
-                  size={40}
-                  className="w-10 h-10 rounded-2xl object-cover transition-transform duration-200"
-                  style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
+                  size={36}
+                  className="h-9 w-9 flex-shrink-0 rounded-full object-cover"
                 />
-                <div className="text-left">
-                  <p
-                    className="text-sm font-semibold leading-tight transition-colors duration-200"
-                    style={{ color: "var(--text-primary)" }}
-                  >
+                <div className="min-w-0 text-left">
+                  <p className="truncate text-base font-semibold leading-5 text-[var(--text-primary)]">
                     {data.user?.displayName || "Chat"}
                   </p>
+                  <p className="max-w-[55vw] truncate text-xs leading-4 text-[var(--text-muted)] md:max-w-[240px]">
+                    {data.user?.isGroup
+                      ? (data.user.members || []).map((member) => member.displayName).filter(Boolean).join(", ")
+                      : data.user?.online === true || data.user?.presence === "online"
+                      ? "online"
+                      : data.user?.lastSeen
+                      ? formatLastSeen(data.user.lastSeen)
+                      : data.user?.presence || ""}
+                  </p>
                 </div>
+              </button>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event("chathere:open-command-palette"))}
+                className="icon-btn-glass"
+                aria-label="Search chats"
+                title="Search chats"
+              >
+                <Search size={17} strokeWidth={1.75} />
+              </button>
+              <button
+                type="button"
+                onClick={() => openContactPanel(data.user)}
+                className="icon-btn-glass"
+                aria-label="Open chat details"
+                title="Chat details"
+              >
+                <MoreHorizontal size={18} strokeWidth={1.75} />
               </button>
             </div>
           </div>
@@ -187,13 +208,7 @@ const Chat = () => {
             <Messages key={data.chatId || "chat"} />
           </div>
 
-          <div
-            className="shrink-0 safe-bottom"
-            style={{
-              borderTop: "1px solid var(--border)",
-              paddingBottom: "env(safe-area-inset-bottom)",
-            }}
-          >
+          <div className="shrink-0">
             <Input />
           </div>
         </div>
@@ -204,9 +219,9 @@ const Chat = () => {
             <div
               className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5"
               style={{
-                background: "linear-gradient(135deg, rgba(99,102,241,0.2), rgba(167,139,250,0.2))",
-                border: "1px solid rgba(99,102,241,0.25)",
-                boxShadow: "0 0 60px rgba(99,102,241,0.1)",
+                background: "linear-gradient(135deg, var(--primary-soft), var(--primary-soft))",
+                border: "1px solid var(--primary-glow)",
+                boxShadow: "0 0 60px var(--primary-soft)",
               }}
             >
               <MessageSquare size={32} style={{ color: "var(--primary-light)" }} />

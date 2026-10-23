@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
 import {
   collection,
   query,
@@ -12,15 +12,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import Avatar from "./Avatar";
 
-const Search = () => {
+const Search = ({ isOpen = true, onClose }) => {
   const [username, setUsername] = useState("");
   const [users, setUsers] = useState([]);
   const [err, setErr] = useState(false);
   const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isOpen) inputRef.current?.focus();
+  }, [isOpen]);
 
   useEffect(() => {
     const searchUsers = async () => {
@@ -79,28 +84,42 @@ const Search = () => {
   };
 
   return (
-    <div className="px-3 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="px-4 pb-3 pt-1">
       <div className="relative">
         <SearchIcon
-          size={15}
+          size={17}
           className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
           style={{ color: "var(--text-muted)" }}
         />
         <input
+          ref={inputRef}
           type="text"
           placeholder="Search people…"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          className="search-input"
+          className="search-input glass"
+          aria-label="Search people"
           id="search-users"
         />
         {username && (
           <button
             onClick={() => { setUsername(""); setUsers([]); }}
+            type="button"
             className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors duration-200"
+            aria-label="Clear search"
             style={{ color: "var(--text-muted)" }}
           >
             <X size={14} />
+          </button>
+        )}
+        {onClose && !username && (
+          <button
+            type="button"
+            onClick={() => { inputRef.current?.blur(); onClose(); }}
+            className="search-close-button absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+            aria-label="Close search"
+          >
+            <X size={15} />
           </button>
         )}
       </div>
@@ -141,29 +160,27 @@ const Search = () => {
                 key={user.uid}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                onClick={() => handleSelect(user)}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 group"
-                style={{ background: "var(--surface-3)", touchAction: "manipulation" }}
-                whileHover={{ backgroundColor: "rgba(99,102,241,0.12)" }}
-                whileTap={{ scale: 0.98 }}
+                className="search-result"
               >
-                <Avatar
-                  src={user.photoURL}
-                  alt={user.displayName}
-                  className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
-                  style={{ border: "1.5px solid rgba(99,102,241,0.3)" }}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ color: "var(--text-primary)" }}>
-                    {user.displayName}
-                  </p>
-                  {user.bio && (
-                    <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>
-                      {user.bio}
-                    </p>
-                  )}
-                </div>
-                <UserPlus size={15} style={{ color: "var(--primary-light)" }} className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                <button type="button" onClick={() => handleSelect(user)} className="search-result-button">
+                  <Avatar
+                    src={user.photoURL}
+                    alt={user.displayName}
+                    className="h-10 w-10 flex-shrink-0 rounded-full object-cover"
+                    style={{ border: "1px solid var(--border-strong)" }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-[var(--text-primary)]">
+                      {user.displayName}
+                    </span>
+                    {user.bio && (
+                      <span className="block truncate text-xs text-[var(--text-muted)]">
+                        {user.bio}
+                      </span>
+                    )}
+                  </span>
+                  <UserPlus size={17} className="flex-shrink-0 text-[var(--primary-text)]" />
+                </button>
               </motion.li>
             ))}
           </motion.ul>

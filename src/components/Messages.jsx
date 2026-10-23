@@ -9,6 +9,24 @@ import { ChevronDown } from "lucide-react";
 import { usePendingMessages, pendingMessagesStore } from "../utils/pendingMessages";
 import { publishChatMessages } from "../utils/chatMessagesStore";
 
+const messageTime = (message) => {
+  const date = message?.date;
+  if (date?.toMillis) return date.toMillis();
+  if (date?.seconds) return date.seconds * 1000;
+  if (date instanceof Date) return date.getTime();
+  return Number(date) || 0;
+};
+
+const dayLabel = (timestamp) => {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], { month: "long", day: "numeric" });
+};
+
 const Messages = () => {
   const [messages, setMessages] = useState([]);
   const [reactions, setReactions] = useState({});
@@ -30,6 +48,94 @@ const Messages = () => {
     () => [...messages, ...activePending],
     [messages, activePending]
   );
+  const renderEntries = useMemo(() => {
+    const entries = [];
+    let lastDay = "";
+    let index = 0;
+    while (index < displayMessages.length) {
+      const message = displayMessages[index];
+      const timestamp = messageTime(message);
+      const day = timestamp ? new Date(timestamp).toDateString() : "";
+      if (day && day !== lastDay) {
+        entries.push({ type: "date", key: `date-${day}`, label: dayLabel(timestamp) });
+        lastDay = day;
+      }
+
+      const canStack = (candidate) =>
+        Boolean(candidate?.img) &&
+        candidate.type !== "deleted" &&
+        !candidate.deleted &&
+        !candidate.deletedAt &&
+        !candidate.replyTo;
+      if (canStack(message) && timestamp > 0) {
+        const stack = [message];
+        let nextIndex = index + 1;
+        while (nextIndex < displayMessages.length) {
+          const next = displayMessages[nextIndex];
+          const elapsed = messageTime(next) - messageTime(displayMessages[nextIndex - 1]);
+          if (
+            !canStack(next) ||
+            next.senderId !== message.senderId ||
+            elapsed < 0 ||
+            elapsed > 90_000
+          ) break;
+          stack.push(next);
+          nextIndex += 1;
+        }
+        if (stack.length > 1) {
+          const previous = displayMessages[index - 1];
+          const next = displayMessages[nextIndex];
+          const lastStackTime = messageTime(stack[stack.length - 1]);
+          const continuesPreviousRun = previous &&
+            messageTime(previous) > 0 &&
+            timestamp - messageTime(previous) >= 0 &&
+            timestamp - messageTime(previous) <= 5 * 60_000 &&
+            previous.senderId === message.senderId;
+          const continuesNextRun = next &&
+            messageTime(next) > 0 &&
+            messageTime(next) - lastStackTime >= 0 &&
+            messageTime(next) - lastStackTime <= 5 * 60_000 &&
+            next.senderId === message.senderId;
+          entries.push({
+            type: "stack",
+            key: `stack-${message.id}`,
+            messages: stack,
+            showGroupSenderName: Boolean(data.user?.isGroup) && !continuesPreviousRun,
+            showGroupAvatar: Boolean(data.user?.isGroup) &&
+              !continuesNextRun &&
+              message.senderId !== currentUser.uid,
+            rowGap: continuesNextRun ? "2px" : "12px",
+          });
+          index += stack.length;
+          continue;
+        }
+      }
+
+      const previous = displayMessages[index - 1];
+      const next = displayMessages[index + 1];
+      const messageTimestamp = messageTime(message);
+      const samePreviousRun = previous &&
+        messageTimestamp > 0 &&
+        messageTime(previous) > 0 &&
+        previous.senderId === message.senderId &&
+        messageTimestamp - messageTime(previous) <= 5 * 60_000;
+      const sameNextRun = next &&
+        messageTimestamp > 0 &&
+        messageTime(next) > 0 &&
+        next.senderId === message.senderId &&
+        messageTime(next) - messageTime(message) <= 5 * 60_000;
+      entries.push({
+        type: "message",
+        key: message.id || index,
+        message,
+        showGroupSenderName: Boolean(data.user?.isGroup) && !samePreviousRun,
+        showGroupAvatar: Boolean(data.user?.isGroup) && !sameNextRun && message.senderId !== currentUser.uid,
+        rowGap: sameNextRun ? "2px" : "12px",
+      });
+      index += 1;
+    }
+    return entries;
+  }, [displayMessages, data.user?.isGroup, currentUser.uid]);
 
   useEffect(() => {
     publishChatMessages(data.chatId, displayMessages);
@@ -48,6 +154,7 @@ const Messages = () => {
   const hasInitialSnapshotRef = useRef(false);
 
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadBelow, setUnreadBelow] = useState(0);
   const scrollTimeoutRef = useRef(null);
   const isHoveringRef = useRef(false);
   const isAutoScrollingRef = useRef(false);
@@ -94,6 +201,7 @@ const Messages = () => {
       observedMessageIdsRef.current = new Set();
       hasInitialSnapshotRef.current = false;
       setShowScrollBottom(false);
+      setUnreadBelow(0);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
         scrollTimeoutRef.current = null;
@@ -111,6 +219,12 @@ const Messages = () => {
           const arrivedIds = [...currentIds].filter((id) => !observedMessageIdsRef.current.has(id));
           if (arrivedIds.length > 0) {
             setLiveMessageIds((existing) => new Set([...existing, ...arrivedIds]));
+            if (!wasNearBottomRef.current) {
+              const incomingCount = newMessages.filter(
+                (message) => arrivedIds.includes(message.id) && message.senderId !== currentUser.uid
+              ).length;
+              if (incomingCount) setUnreadBelow((count) => count + incomingCount);
+            }
           }
         } else {
           hasInitialSnapshotRef.current = true;
@@ -174,6 +288,7 @@ const Messages = () => {
     if (atBottom) {
       isAutoScrollingRef.current = false;
       setShowScrollBottom(false);
+      setUnreadBelow(0);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
         scrollTimeoutRef.current = null;
@@ -371,10 +486,10 @@ const Messages = () => {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 py-5 custom-scrollbar overscroll-contain"
-        style={{ background: "var(--surface)", overscrollBehavior: "contain" }}
+        className="ember-bg flex-1 min-h-0 overflow-y-auto px-4 py-5 custom-scrollbar overscroll-contain"
+        style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
       >
-        <div ref={contentRef} className="space-y-1 min-h-full flex flex-col">
+        <div ref={contentRef} className="min-h-full flex flex-col">
           {displayMessages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -382,40 +497,64 @@ const Messages = () => {
               </p>
             </div>
           ) : (
-            displayMessages.map((m, index) => (
-              <Message
-                key={m.id || index}
-                message={m}
-                lastRead={lastRead}
-                reactions={reactions?.[m.id] || {}}
-                isLive={m.status === "sending" || liveMessageIds.has(m.id)}
-              />
-            ))
+            renderEntries.map((entry) => {
+              if (entry.type === "date") {
+                return (
+                  <div key={entry.key} className="chat-date-separator">
+                    {entry.label}
+                  </div>
+                );
+              }
+              if (entry.type === "stack") {
+                const stackMessages = entry.messages;
+                const lastImage = stackMessages[stackMessages.length - 1];
+                return (
+                  <Message
+                    key={entry.key}
+                    message={stackMessages[0]}
+                    photoStack={stackMessages}
+                    photoStackLastMessage={lastImage}
+                    lastRead={lastRead}
+                    reactions={reactions?.[lastImage.id] || {}}
+                    isLive={stackMessages.some((item) => item.status === "sending" || liveMessageIds.has(item.id))}
+                    showGroupSenderName={entry.showGroupSenderName}
+                    showGroupAvatar={entry.showGroupAvatar}
+                    rowGap={entry.rowGap}
+                  />
+                );
+              }
+              return (
+                <Message
+                  key={entry.key}
+                  message={entry.message}
+                  lastRead={lastRead}
+                  reactions={reactions?.[entry.message.id] || {}}
+                  isLive={entry.message.status === "sending" || liveMessageIds.has(entry.message.id)}
+                  showGroupSenderName={entry.showGroupSenderName}
+                  showGroupAvatar={entry.showGroupAvatar}
+                  rowGap={entry.rowGap}
+                />
+              );
+            })
           )}
 
           {Object.entries(typing)
             .filter(([uid, isTyping]) => isTyping && uid !== currentUser.uid)
             .map(([uid]) => (
               <div key={uid} className="flex items-end gap-2.5 mb-3 px-2 mt-2">
-                <div
-                  className="flex bg-[var(--surface-3)] px-4 py-2.5 rounded-full items-center gap-1.5"
-                  style={{ border: "1px solid var(--border)" }}
-                >
+                <div className="msg-bubble-received flex items-center gap-1.5 rounded-full px-4 py-2.5">
                   <motion.div
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: "var(--primary-light)" }}
+                    className="typing-dot"
                     animate={{ y: [0, -4, 0] }}
                     transition={{ repeat: Infinity, duration: 0.6, delay: 0 }}
                   />
                   <motion.div
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: "var(--primary-light)" }}
+                    className="typing-dot"
                     animate={{ y: [0, -4, 0] }}
                     transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }}
                   />
                   <motion.div
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: "var(--primary-light)" }}
+                    className="typing-dot"
                     animate={{ y: [0, -4, 0] }}
                     transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }}
                   />
@@ -429,33 +568,32 @@ const Messages = () => {
 
       <AnimatePresence>
         {showScrollBottom && (
-          <motion.button
-            type="button"
-            onClick={scrollToBottom}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+          <motion.div
             initial={{ opacity: 0, scale: 0.8, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 10 }}
             whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.92 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            aria-label="Scroll to bottom"
-            className="absolute bottom-4 right-4 z-20 flex items-center justify-center w-9 h-9 rounded-full cursor-pointer group"
-            style={{
-              background: "var(--surface-2)",
-              border: "1px solid var(--border-light)",
-              boxShadow: "0 4px 16px var(--shadow), 0 0 0 1px var(--glass-inset) inset",
-              color: "var(--text-secondary)",
-              touchAction: "manipulation",
-            }}
+            className="absolute bottom-4 right-4 z-20"
           >
-            <ChevronDown
-              size={18}
-              strokeWidth={2.4}
-              className="group-hover:text-[var(--primary)] transition-colors duration-150"
-            />
-          </motion.button>
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
+              aria-label="Scroll to bottom"
+              className="glass icon-btn-glass relative h-10 w-10 cursor-pointer group"
+            >
+              <ChevronDown
+                size={18}
+                strokeWidth={2.4}
+                className="group-hover:text-[var(--primary)] transition-colors duration-150"
+              />
+              {unreadBelow > 0 && (
+                <span className="scroll-unread-count">{unreadBelow}</span>
+              )}
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

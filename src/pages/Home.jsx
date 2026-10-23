@@ -4,7 +4,7 @@ import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import Sidebar from "../components/Sidebar";
 import Chat from "../components/Chat";
 
-const Home = () => {
+const Home = ({ mobileRootOnly = false }) => {
   const location = useLocation();
   const { chatId } = useParams();
   const shouldReduceMotion = useReducedMotion();
@@ -71,7 +71,11 @@ const Home = () => {
         height: "var(--app-height, 100dvh)",
       }}
     >
-      {isMobile ? (
+      {isMobile && mobileRootOnly ? (
+        <div className="absolute inset-0 w-full h-full overflow-hidden">
+          <Sidebar />
+        </div>
+      ) : isMobile ? (
         /* Mobile: single-pane view driven by URL with popLayout slide transition */
         <AnimatePresence mode="popLayout" custom={directionRef.current} initial={false}>
           {isChatRoute ? (
