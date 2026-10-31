@@ -8,3 +8,4 @@ export const UserChatsMetadataContext = createContext({});
 export const UserUnreadContext = createContext({});
 export const UserDocumentContext = createContext({});
 export const UserDocumentLoadedContext = createContext(null);
+export const UserChatsLoadedContext = createContext(null);

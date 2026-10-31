@@ -1,0 +1,10 @@
+ChatHere icon pack (Ember)
+
+1. Copy everything inside public/ into your project's public/ folder (overwrite).
+   icon-192.png, icon-512.png, icon-maskable.png keep the same names as before,
+   so manifest.json keeps working. New files: icon-monochrome.png, badge-96.png,
+   apple-touch-icon.png, favicon.svg, favicon.ico, favicon-32.png, icon.svg.
+2. Copy src/components/ui/Logo.jsx into src/components/ui/.
+3. Wire the manifest, index.html, service worker badge and in-app logo
+   (see the Copilot prompt in the chat).
+4. alternates/ holds concepts B and C if you prefer one of them.

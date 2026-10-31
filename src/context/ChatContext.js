@@ -14,6 +14,7 @@ import {
   UserUnreadContext,
   UserDocumentContext,
   UserDocumentLoadedContext,
+  UserChatsLoadedContext,
 } from "./ChatContexts";
 
 export {
@@ -25,6 +26,7 @@ export {
   UserUnreadContext,
   UserDocumentContext,
   UserDocumentLoadedContext,
+  UserChatsLoadedContext,
 };
 
 export const ChatContextProvider = ({ children }) => {
@@ -53,6 +55,7 @@ export const ChatContextProvider = ({ children }) => {
   const userChatsRef = useRef({});
   const [userChatsSnapshot, setUserChatsSnapshot] = useState({});
   const [userChatsLoaded, setUserChatsLoaded] = useState(false);
+  const [userChatsLoadedUid, setUserChatsLoadedUid] = useState(null);
   const [userDocument, setUserDocument] = useState({});
   const [userDocumentLoaded, setUserDocumentLoaded] = useState(null);
   const userChatsMetadataRef = useRef({ signature: null, value: {} });
@@ -107,6 +110,7 @@ export const ChatContextProvider = ({ children }) => {
   // Subscribe to the current user's userChats collection
   useEffect(() => {
     setUserChatsLoaded(false);
+    setUserChatsLoadedUid(null);
     userChatsRef.current = {};
     setUserChatsSnapshot({});
     if (!currentUser?.uid) {
@@ -123,6 +127,7 @@ export const ChatContextProvider = ({ children }) => {
         }
         setUserChatsSnapshot(userChatsRef.current);
         setUserChatsLoaded(true);
+        setUserChatsLoadedUid(currentUser.uid);
       },
       (err) => {
         console.error("userChats snapshot error:", err);
@@ -336,19 +341,21 @@ export const ChatContextProvider = ({ children }) => {
   return (
     <ChatContext.Provider value={value}>
       <UserChatsContext.Provider value={userChatsSnapshot}>
-        <UserChatsMetadataContext.Provider value={userChatsMetadata}>
-          <UserUnreadContext.Provider value={userUnread}>
-            <UserDocumentContext.Provider value={userDocument}>
-              <UserDocumentLoadedContext.Provider value={userDocumentLoaded}>
-                <ContactPanelContext.Provider value={panelValue}>
-                  <ContactPanelActionsContext.Provider value={panelActions}>
-                    {children}
-                  </ContactPanelActionsContext.Provider>
-                </ContactPanelContext.Provider>
-              </UserDocumentLoadedContext.Provider>
-            </UserDocumentContext.Provider>
-          </UserUnreadContext.Provider>
-        </UserChatsMetadataContext.Provider>
+        <UserChatsLoadedContext.Provider value={userChatsLoadedUid}>
+          <UserChatsMetadataContext.Provider value={userChatsMetadata}>
+            <UserUnreadContext.Provider value={userUnread}>
+              <UserDocumentContext.Provider value={userDocument}>
+                <UserDocumentLoadedContext.Provider value={userDocumentLoaded}>
+                  <ContactPanelContext.Provider value={panelValue}>
+                    <ContactPanelActionsContext.Provider value={panelActions}>
+                      {children}
+                    </ContactPanelActionsContext.Provider>
+                  </ContactPanelContext.Provider>
+                </UserDocumentLoadedContext.Provider>
+              </UserDocumentContext.Provider>
+            </UserUnreadContext.Provider>
+          </UserChatsMetadataContext.Provider>
+        </UserChatsLoadedContext.Provider>
       </UserChatsContext.Provider>
     </ChatContext.Provider>
   );

@@ -33,4 +33,9 @@ describe("getMessagesToAppend", () => {
       [{ id: "existing", text: "duplicate" }, { id: "new", text: "next" }]
     )).toEqual([{ id: "new", text: "next" }]);
   });
+
+  it("ignores invalid candidates and nullish chat state", () => {
+    expect(getMessagesToAppend(null, [undefined, { id: "new", text: "next" }, { text: "missing" }]))
+      .toEqual([{ id: "new", text: "next" }]);
+  });
 });

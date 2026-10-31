@@ -19,6 +19,7 @@ const NotificationBanner = ({ onVisibilityChange }) => {
   const [initialized, setInitialized] = useState(false);
   const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
+  const [requestError, setRequestError] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -43,6 +44,18 @@ const NotificationBanner = ({ onVisibilityChange }) => {
       setDismissed(false);
     }
     setInitialized(true);
+
+    const refreshPermissionState = () => {
+      const permission = getPermissionState();
+      setPermissionState(permission);
+      setIsIOSNonStandalone(isIOS() && !isStandalone());
+    };
+    window.addEventListener("focus", refreshPermissionState);
+    document.addEventListener("visibilitychange", refreshPermissionState);
+    return () => {
+      window.removeEventListener("focus", refreshPermissionState);
+      document.removeEventListener("visibilitychange", refreshPermissionState);
+    };
   }, []);
 
   const shouldShow = initialized && !dismissed && permissionState !== "granted" && permissionState !== "denied";
@@ -61,6 +74,7 @@ const NotificationBanner = ({ onVisibilityChange }) => {
 
   const handleEnable = async () => {
     setIsRequesting(true);
+    setRequestError("");
     try {
       const granted = await requestNotificationPermission(currentUser);
       if (granted) {
@@ -69,6 +83,10 @@ const NotificationBanner = ({ onVisibilityChange }) => {
       } else {
         setPermissionState(getPermissionState());
       }
+    } catch (error) {
+      console.error("Could not enable notifications:", error);
+      setPermissionState(getPermissionState());
+      setRequestError("Could not enable notifications. Please try again.");
     } finally {
       setIsRequesting(false);
     }
@@ -121,6 +139,7 @@ const NotificationBanner = ({ onVisibilityChange }) => {
                 <div className="text-[10px] text-[var(--text-muted)] leading-tight truncate">
                   Get notified when friends send you messages
                 </div>
+                {requestError && <p role="alert" className="w-full text-[var(--danger-text)]">{requestError}</p>}
               </div>
             )}
           </div>

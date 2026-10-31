@@ -31,6 +31,10 @@ Set these in a local `.env` file for development and in Vercel project settings 
 - `REACT_APP_FIREBASE_VAPID_KEY`
 - `FIREBASE_SERVICE_ACCOUNT_B64` (server-side Vercel function)
 
+## Notifications
+
+Browser notifications require a secure origin, user-granted notification permission, and the Firebase Messaging VAPID key. Background push delivery also requires `FIREBASE_SERVICE_ACCOUNT_B64` on the server. Preview and vibration preferences are synced to the signed-in user's profile so background notifications follow the same privacy choices; until preferences are synced, push previews are hidden. iPhone/iPad web push requires an installed home-screen app on supported iOS versions.
+
 ## Run Locally
 
 ```sh

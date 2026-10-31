@@ -29,29 +29,33 @@ self.addEventListener("activate", (event) => {
 // OS-level notification click handling
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const chatId = event.notification.data?.chatId;
-  const targetPath = chatId ? `/chat/${chatId}` : "/";
+  const rawChatId = event.notification.data?.chatId;
+  const chatId = typeof rawChatId === "string" && rawChatId.length <= 200 ? rawChatId : "";
+  const targetPath = chatId ? `/chat/${encodeURIComponent(chatId)}` : "/";
 
   event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clientList) => {
-        // If an existing tab/window is found, focus it and tell it to navigate
-        for (const client of clientList) {
-          if ("focus" in client) {
-            return client.focus().then((focusedClient) => {
-              if (focusedClient && chatId) {
-                focusedClient.postMessage({ type: "OPEN_CHAT", chatId });
-              }
-              return focusedClient;
-            });
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const client =
+        clientList.find((item) => item.visibilityState === "visible" && item.focused) ||
+        clientList.find((item) => typeof item.focus === "function");
+
+      if (client && typeof client.focus === "function") {
+        try {
+          await client.focus();
+          if (chatId) {
+            client.postMessage({ type: "OPEN_CHAT", chatId });
           }
+          return;
+        } catch (error) {
+          console.warn("Could not focus a window for the notification:", error);
         }
-        // Otherwise, open a new window directly to the chat
-        if (self.clients.openWindow) {
-          return self.clients.openWindow(targetPath);
-        }
-      })
+      }
+
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(new URL(targetPath, self.location.origin).href);
+      }
+    })()
   );
 });
 
@@ -72,7 +76,8 @@ self.addEventListener("push", (event) => {
 
   const payloadData = data.data || {};
   const title = payloadData.title || data.title || data.notification?.title || "ChatHere";
-  const body = payloadData.body || data.body || data.notification?.body || "You have a new message";
+  const rawBody = payloadData.body || data.body || data.notification?.body || "You have a new message";
+  const body = payloadData.showPreview === "false" ? "New message received" : rawBody;
   const icon = payloadData.icon || data.icon || data.notification?.icon || "/icon-192.png";
   const chatId = payloadData.chatId || data.chatId || "";
 
@@ -82,9 +87,9 @@ self.addEventListener("push", (event) => {
     badge: "/icon-192.png",
     tag: chatId ? "chat-" + chatId : "chat-notification",
     renotify: true,
-    vibrate: [150, 60, 150],
     data: { chatId },
   };
+  if (payloadData.vibrate !== "false") options.vibrate = [150, 60, 150];
 
   event.waitUntil(
     self.clients

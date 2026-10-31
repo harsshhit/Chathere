@@ -9,5 +9,6 @@ describe("normalizeSearchText", () => {
   it("keeps empty strings empty", () => {
     expect(normalizeSearchText("")).toBe("");
     expect(normalizeSearchText(undefined)).toBe("");
+    expect(normalizeSearchText(null)).toBe("");
   });
 });

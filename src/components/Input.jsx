@@ -628,7 +628,10 @@ const Input = () => {
   }, [data.chatId, handleFilesAdded]);
 
   const notifyRecipients = async (recipientUids, body, chatId = data.chatId) => {
-    if (recipientUids.length === 0) {
+    const recipientsToNotify = [...new Set(
+      recipientUids.filter((uid) => typeof uid === "string" && uid)
+    )];
+    if (recipientsToNotify.length === 0) {
       console.warn("notify skipped: no recipients");
       return;
     }
@@ -636,7 +639,7 @@ const Input = () => {
     try {
       const firebaseUser = auth.currentUser;
       if (!firebaseUser) throw new Error("You must be signed in to send notifications.");
-      const requestNotification = async (forceRefresh) => {
+      const requestNotification = async (recipients, forceRefresh) => {
         const idToken = await firebaseUser.getIdToken(forceRefresh);
         return fetch("/api/notify", {
           method: "POST",
@@ -646,21 +649,25 @@ const Input = () => {
           },
           body: JSON.stringify({
             chatId,
-            recipientUids,
-            title: currentUser.displayName || "New message",
-            body,
+            recipientUids: recipients,
+            title: (currentUser.displayName || "New message").slice(0, 120),
+            body: String(body || "").slice(0, 1000),
           }),
         });
       };
-      let response = await requestNotification(false);
-      if (response.status === 401) response = await requestNotification(true);
 
-      if (!response.ok) {
-        console.warn("notify failed", response.status, await response.text());
-        return;
+      for (let offset = 0; offset < recipientsToNotify.length; offset += 50) {
+        const recipients = recipientsToNotify.slice(offset, offset + 50);
+        let response = await requestNotification(recipients, false);
+        if (response.status === 401) response = await requestNotification(recipients, true);
+
+        if (!response.ok) {
+          console.warn("notify failed", response.status, await response.text());
+          continue;
+        }
+
+        console.info("notify ok", await response.json());
       }
-
-      console.info("notify ok", await response.json());
     } catch (error) {
       console.warn("notify error", error);
     }

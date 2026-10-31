@@ -35,8 +35,16 @@ export const estimateDocumentBytes = (value) => {
 };
 
 export const getMessagesToAppend = (currentMessages, candidates) => {
-  const currentIds = new Set(currentMessages.map((message) => message?.id).filter(Boolean));
-  return candidates.filter((message) => !currentIds.has(message.id));
+  const currentIds = new Set(
+    (Array.isArray(currentMessages) ? currentMessages : []).map((message) => message?.id).filter(Boolean)
+  );
+
+  return (Array.isArray(candidates) ? candidates : []).filter((message) => {
+    if (!message || typeof message !== "object" || typeof message.id !== "string" || !message.id) {
+      return false;
+    }
+    return !currentIds.has(message.id);
+  });
 };
 
 const getUserInfoForMember = (uid, chatUser, sender) => {
@@ -101,8 +109,10 @@ export const writeChatMessages = async ({
 
     const sentAt = uniqueMessages[uniqueMessages.length - 1].date || Timestamp.now();
     const safeLastMessage = removeUndefinedValues({
+      id: uniqueMessages[uniqueMessages.length - 1].id,
       text: lastMessageText || "",
       senderId: sender.uid,
+      senderName: sender.displayName || "",
       date: sentAt,
       ...(lastMessageType ? { type: lastMessageType } : {}),
     });

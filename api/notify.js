@@ -1,4 +1,5 @@
 const admin = require("firebase-admin");
+const { getNotificationBody, getRecipientNotificationSettings } = require("./notificationPreferences");
 
 let firebaseApp;
 const rateLimitsByUid = new Map();
@@ -128,31 +129,55 @@ module.exports = async (req, res) => {
           db.collection("users").doc(uid).get(),
         ]);
         if (!chatDoc.exists || !hasChat(chatDoc.data() || {}, chatId)) return null;
-        const mutedUntil = userDoc.data()?.chatPrefs?.[chatId]?.mutedUntil || 0;
-        return mutedUntil > Date.now() ? null : uid;
+        const recipient = userDoc.data() || {};
+        const mutedUntil = recipient.chatPrefs?.[chatId]?.mutedUntil || 0;
+        if (mutedUntil > Date.now()) return null;
+        return {
+          uid,
+          ...getRecipientNotificationSettings(recipient),
+        };
       })
     );
-    const authorizedRecipientUids = authorizedRecipients.filter(Boolean);
-    console.info("notify recipients authorized:", authorizedRecipientUids.length);
+    const authorizedRecipientSettings = authorizedRecipients.filter(Boolean);
+    console.info("notify recipients authorized:", authorizedRecipientSettings.length);
 
-    const tokenOwners = new Map();
+    const tokenSettings = new Map();
     await Promise.all(
-      authorizedRecipientUids.map(async (uid) => {
+      authorizedRecipientSettings.map(async ({ uid, showPreview, vibrate }) => {
         const tokenDoc = await db.collection("fcmTokens").doc(uid).get();
         const savedTokens = tokenDoc.data()?.tokens;
         if (!Array.isArray(savedTokens)) return;
 
         for (const token of savedTokens) {
           if (typeof token !== "string" || !token) continue;
-          if (!tokenOwners.has(token)) tokenOwners.set(token, new Set());
-          tokenOwners.get(token).add(uid);
+          const current = tokenSettings.get(token);
+          if (!current) {
+            tokenSettings.set(token, {
+              owners: new Set([uid]),
+              showPreview,
+              vibrate,
+            });
+          } else {
+            current.owners.add(uid);
+            current.showPreview = current.showPreview && showPreview;
+            current.vibrate = current.vibrate || vibrate;
+          }
         }
       })
     );
 
-    const tokenEntries = [...tokenOwners.entries()];
-    console.info("notify tokens found:", tokenEntries.length);
-    if (tokenEntries.length === 0) {
+    const deliveryGroups = new Map();
+    for (const [token, settings] of tokenSettings.entries()) {
+      const groupKey = `${settings.showPreview}:${settings.vibrate}`;
+      if (!deliveryGroups.has(groupKey)) {
+        deliveryGroups.set(groupKey, { ...settings, tokens: [] });
+      }
+      deliveryGroups.get(groupKey).tokens.push(token);
+    }
+
+    const tokenCount = [...deliveryGroups.values()].reduce((count, group) => count + group.tokens.length, 0);
+    console.info("notify tokens found:", tokenCount);
+    if (tokenCount === 0) {
       console.info("notify sent/failed:", 0, 0);
       return res.status(200).json({ sent: 0, failed: 0, errorCodes: [] });
     }
@@ -163,41 +188,45 @@ module.exports = async (req, res) => {
     let sent = 0;
     let failed = 0;
 
-    for (let offset = 0; offset < tokenEntries.length; offset += 500) {
-      const batch = tokenEntries.slice(offset, offset + 500);
-      const result = await messaging.sendEachForMulticast({
-        tokens: batch.map(([token]) => token),
-        data: {
-          title,
-          body: body.slice(0, 120),
-          chatId,
-          icon: "/icon-192.png",
-        },
-        webpush: { headers: { Urgency: "high", TTL: "86400" } },
-      });
+    for (const group of deliveryGroups.values()) {
+      for (let offset = 0; offset < group.tokens.length; offset += 500) {
+        const batch = group.tokens.slice(offset, offset + 500);
+        const result = await messaging.sendEachForMulticast({
+          tokens: batch,
+          data: {
+            title,
+            body: getNotificationBody(body, group.showPreview),
+            chatId,
+            icon: "/icon-192.png",
+            showPreview: String(group.showPreview),
+            vibrate: String(group.vibrate),
+          },
+          webpush: { headers: { Urgency: "high", TTL: "86400" } },
+        });
 
-      sent += result.successCount;
-      failed += result.failureCount;
-      result.responses.forEach((response, index) => {
-        if (!response.success) {
-          const errorCode = response.error?.code || "unknown";
-          errorCodes.add(errorCode);
-          console.error("push failed:", errorCode);
-        }
+        sent += result.successCount;
+        failed += result.failureCount;
+        result.responses.forEach((response, index) => {
+          if (!response.success) {
+            const errorCode = response.error?.code || "unknown";
+            errorCodes.add(errorCode);
+            console.error("push failed:", errorCode);
+          }
 
-        const errorCode = response.error?.code;
-        if (
-          errorCode !== "messaging/registration-token-not-registered" &&
-          errorCode !== "messaging/invalid-registration-token"
-        ) {
-          return;
-        }
+          const errorCode = response.error?.code;
+          if (
+            errorCode !== "messaging/registration-token-not-registered" &&
+            errorCode !== "messaging/invalid-registration-token"
+          ) {
+            return;
+          }
 
-        for (const uid of tokenOwners.get(batch[index][0]) || []) {
-          if (!deadTokensByUid.has(uid)) deadTokensByUid.set(uid, new Set());
-          deadTokensByUid.get(uid).add(batch[index][0]);
-        }
-      });
+          for (const uid of tokenSettings.get(batch[index])?.owners || []) {
+            if (!deadTokensByUid.has(uid)) deadTokensByUid.set(uid, new Set());
+            deadTokensByUid.get(uid).add(batch[index]);
+          }
+        });
+      }
     }
 
     const fieldValue = admin.firestore.FieldValue;

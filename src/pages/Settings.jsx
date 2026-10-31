@@ -3,14 +3,18 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import { ArrowLeft, Bell, ChevronRight, Download, Image as ImageIcon, LogOut, Moon, PlusSquare, Send, Share2, Shield, Sun, Check } from "lucide-react";
 import { signOut } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 import appPackage from "../../package.json";
 import { AuthContext } from "../context/AuthContext";
-import { auth } from "../firebase";
+import { UserDocumentContext, UserDocumentLoadedContext } from "../context/ChatContexts";
+import { auth, db } from "../firebase";
 import { useInstall } from "../context/InstallContext";
 import { useTheme } from "../context/ThemeContext";
 import { getPermissionState, requestNotificationPermission, notifyMessage, isIOS, isStandalone, getNotificationSettings, saveNotificationSettings, playTonePreview } from "../utils/notify";
 import { ScreenHeader, Section, SettingsGroup, SettingsRow, Toggle, Segmented, Sheet, Toast } from "../components/ui";
 import { useMediaPolicy } from "../utils/mediaPolicy";
+import { clearMediaCache } from "../utils/mediaCache";
+import { clearOwnMediaCache } from "../utils/ownMediaCache";
 import { cleanupUserSession } from "../utils/sessionCleanup";
 
 const NotificationSettingsScreen = lazy(() => import("./NotificationSettingsScreen"));
@@ -21,6 +25,8 @@ const THEME_OPTIONS = [
 ];
 const Settings = () => {
   const { currentUser } = useContext(AuthContext);
+  const userDocument = useContext(UserDocumentContext);
+  const userDocumentLoadedUid = useContext(UserDocumentLoadedContext);
   const { theme, setTheme } = useTheme();
   const { dataSaver, setDataSaver } = useMediaPolicy();
   const { canInstall, isInstalled, promptInstall, isIOS: isInstallIOS } = useInstall();
@@ -44,10 +50,42 @@ const Settings = () => {
 
   useEffect(() => { window.localStorage.setItem("chathere:enterToSend", String(enterToSend)); }, [enterToSend]);
   useEffect(() => {
-    setPermissionState(getPermissionState());
-    setIosNeedsInstall(isIOS() && !isStandalone());
+    const refreshPermissionState = () => {
+      setPermissionState(getPermissionState());
+      setIosNeedsInstall(isIOS() && !isStandalone());
+    };
+    refreshPermissionState();
     setNotifSettings(getNotificationSettings());
+    window.addEventListener("focus", refreshPermissionState);
+    document.addEventListener("visibilitychange", refreshPermissionState);
+    return () => {
+      window.removeEventListener("focus", refreshPermissionState);
+      document.removeEventListener("visibilitychange", refreshPermissionState);
+    };
   }, []);
+  useEffect(() => {
+    if (!currentUser?.uid || userDocumentLoadedUid !== currentUser.uid) return;
+    const localSettings = getNotificationSettings();
+    const storedSettings = userDocument.notificationSettings || {};
+    const merged = { ...localSettings, ...storedSettings };
+    setNotifSettings(merged);
+    saveNotificationSettings(merged);
+
+    if (
+      typeof storedSettings.showPreview !== "boolean" ||
+      typeof storedSettings.vibrate !== "boolean"
+    ) {
+      setDoc(doc(db, "users", currentUser.uid), {
+        notificationSettings: {
+          showPreview: merged.showPreview,
+          vibrate: merged.vibrate,
+        },
+      }, { merge: true }).catch((cause) => {
+        console.error("Could not sync notification preferences:", cause);
+        setError("Could not sync notification preferences. Please try again.");
+      });
+    }
+  }, [currentUser?.uid, userDocument.notificationSettings, userDocumentLoadedUid]);
   const refreshStorageEstimate = useCallback(async () => {
     if (typeof navigator === "undefined" || !navigator.storage?.estimate) return;
     try {
@@ -63,31 +101,48 @@ const Settings = () => {
   useEffect(() => { refreshStorageEstimate(); }, [refreshStorageEstimate]);
 
   const saveNotificationOption = (key, value) => {
+    setError("");
     const updated = saveNotificationSettings({ [key]: value });
     if (updated) setNotifSettings(updated);
+    if (["showPreview", "vibrate"].includes(key) && currentUser?.uid) {
+      setDoc(doc(db, "users", currentUser.uid), {
+        notificationSettings: { [key]: value },
+      }, { merge: true }).catch((cause) => {
+        console.error("Could not save notification preference:", cause);
+        setError("Could not sync this notification preference. Please try again.");
+      });
+    }
   };
   const requestPermission = async () => {
     if (iosNeedsInstall || ["granted", "denied", "unsupported"].includes(permissionState)) return;
+    setError("");
     try {
       await requestNotificationPermission(currentUser);
       setPermissionState(getPermissionState());
     } catch (cause) {
       console.error("Could not enable notifications:", cause);
+      setPermissionState(getPermissionState());
       setError("Could not enable notifications. Please check your browser permissions.");
     }
   };
   const sendTest = async () => {
+    setError("");
     try {
-      await notifyMessage({
+      const displayed = await notifyMessage({
         chatId: "test-preview",
         title: "ChatHere Test",
-        body: "Sample notification! Sound, vibration, and service worker are functioning properly.",
+        body: "Test notification from ChatHere. Your current notification preferences apply.",
         icon: "/icon-192.png",
       });
+      if (!displayed) {
+        setError("Could not display a test notification. Check notification permission and browser support.");
+        return;
+      }
       setTestSent(true);
       window.setTimeout(() => setTestSent(false), 3000);
-    } catch (error) {
-      console.warn("Failed to send test notification:", error);
+    } catch (cause) {
+      console.error("Failed to send test notification:", cause);
+      setError("Could not display a test notification. Please try again.");
     }
   };
   const setOverlay = (open) => window.dispatchEvent(new CustomEvent("chathere:mobile-overlay", { detail: { open } }));
