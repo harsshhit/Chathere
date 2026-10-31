@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { createUserWithEmailAndPassword, updateProfile, signInWithPopup } from "firebase/auth";
-import { auth, db, googleProvider } from "../firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { auth, googleProvider } from "../firebaseApp";
 import { User, Mail, Lock, Eye, EyeOff, Sparkles, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Avatar from "../components/Avatar";
+import { normalizeSearchText } from "../utils/searchableName";
 
 const Register = () => {
   const [err, setErr] = useState(false);
@@ -50,9 +50,15 @@ const Register = () => {
       const generatedPhotoURL = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(res.user.uid || displayName.trim())}`;
 
       await updateProfile(res.user, { displayName: displayName.trim(), photoURL: generatedPhotoURL });
+      const [{ db }, { doc, setDoc }] = await Promise.all([
+        import("../firebase"),
+        import("firebase/firestore"),
+      ]);
+      const normalizedDisplayName = displayName.trim();
       await setDoc(doc(db, "users", res.user.uid), {
         uid: res.user.uid,
-        displayName: displayName.trim(),
+        displayName: normalizedDisplayName,
+        displayNameLower: normalizeSearchText(normalizedDisplayName),
         email,
         photoURL: generatedPhotoURL,
       });
@@ -63,7 +69,7 @@ const Register = () => {
       console.error(error);
       setErr(true);
       if (error.code === "auth/email-already-in-use") {
-        setErrMsg("An account with this email already exists.");
+        setErrMsg("Could not create an account. Check your details and try again.");
       } else if (error.code === "auth/weak-password") {
         setErrMsg("Password should be at least 6 characters.");
       } else {
@@ -81,6 +87,10 @@ const Register = () => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
+      const [{ db }, { doc, setDoc, getDoc }] = await Promise.all([
+        import("../firebase"),
+        import("firebase/firestore"),
+      ]);
       const userDoc = await getDoc(doc(db, "users", user.uid));
       const userChatsDoc = await getDoc(doc(db, "userChats", user.uid));
 
@@ -89,12 +99,14 @@ const Register = () => {
         `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(user.uid || user.displayName || "User")}`;
 
       if (!userDoc.exists()) {
-        await setDoc(doc(db, "users", user.uid), {
+        const userData = Object.fromEntries(Object.entries({
           uid: user.uid,
           displayName: user.displayName,
+          displayNameLower: normalizeSearchText(user.displayName || ""),
           email: user.email,
           photoURL,
-        });
+        }).filter(([, value]) => value !== undefined));
+        await setDoc(doc(db, "users", user.uid), userData);
       }
       if (!userChatsDoc.exists()) {
         await setDoc(doc(db, "userChats", user.uid), {});

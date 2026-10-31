@@ -4,8 +4,6 @@
  * with robust fallbacks, audio unlocks, sound preferences, and vibration.
  */
 
-import { registerPushToken } from "./pushToken";
-
 const SETTINGS_KEY = "chathere_notification_settings";
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
@@ -161,14 +159,8 @@ export const requestNotificationPermission = async (currentUser) => {
   try {
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
+      const { registerPushToken } = await import("./pushToken");
       await registerPushToken(currentUser);
-      if ("serviceWorker" in navigator) {
-        try {
-          await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        } catch (swErr) {
-          console.warn("Service worker registration failed after permission granted:", swErr);
-        }
-      }
       return true;
     }
     return false;

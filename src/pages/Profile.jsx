@@ -1,19 +1,26 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Camera, Calendar, Check, Edit2, Info, LogOut, Mail, Settings, Archive } from "lucide-react";
-import { updateProfile, signOut } from "firebase/auth";
-import { doc, updateDoc, getDoc } from "firebase/firestore";
+import { ArrowLeft, Calendar, Info, Mail, X } from "lucide-react";
+import { updateProfile } from "firebase/auth";
+import { doc, FieldPath, updateDoc, getDoc } from "firebase/firestore";
 import { AuthContext } from "../context/AuthContext";
-import { UserChatsContext, UserDocumentContext } from "../context/ChatContext";
+import { UserChatsMetadataContext, UserDocumentContext } from "../context/ChatContexts";
 import Avatar from "../components/Avatar";
-import AvatarPicker from "../components/AvatarPicker";
-import { SettingsGroup, SettingsRow, ScreenHeader, Section, StatCard, Sheet } from "../components/ui";
+import { SettingsGroup, SettingsRow, ScreenHeader, Section, StatCard, Toast } from "../components/ui";
 import { auth, db } from "../firebase";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { formatLongDate } from "../utils/formatters";
+import useCopyToClipboard from "../utils/useCopyToClipboard";
+import LazyImage from "../components/ui/LazyImage";
+import { mergeCachedUserDocument } from "../utils/userDocumentCache";
+import { normalizeSearchText } from "../utils/searchableName";
+
+const AvatarPicker = lazy(() => import("../components/AvatarPicker"));
+const ProfileEditScreen = lazy(() => import("./ProfileEditScreen"));
 
 const Profile = () => {
   const { currentUser, updateAuthUser } = useContext(AuthContext);
-  const userChats = useContext(UserChatsContext);
+  const userChats = useContext(UserChatsMetadataContext);
   const userDocument = useContext(UserDocumentContext);
   const navigate = useNavigate();
   const location = useLocation();
@@ -23,11 +30,15 @@ const Profile = () => {
   const [bioDraft, setBioDraft] = useState(userDocument.bio || "");
   const [bioTouched, setBioTouched] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copyText: copyValue } = useCopyToClipboard(1600);
   const [error, setError] = useState("");
   const dirty = nameDraft.trim() !== (currentUser?.displayName || "") || bioDraft !== (userDocument.bio || "");
+  const confirmDiscardChanges = useCallback(
+    () => !dirty || window.confirm("Discard your unsaved profile changes?"),
+    [dirty]
+  );
 
   useEffect(() => {
     setNameDraft(currentUser?.displayName || "");
@@ -40,7 +51,7 @@ const Profile = () => {
   useEffect(() => {
     const onPopState = () => {
       if (editMode && dirty) {
-        if (!window.confirm("Discard your unsaved profile changes?")) {
+        if (!confirmDiscardChanges()) {
           navigate("/profile/edit", { replace: true });
         } else {
           setNameDraft(currentUser?.displayName || "");
@@ -51,7 +62,7 @@ const Profile = () => {
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [currentUser?.displayName, dirty, editMode, navigate, userDocument.bio]);
+  }, [confirmDiscardChanges, currentUser?.displayName, dirty, editMode, navigate, userDocument.bio]);
 
   const chatEntries = useMemo(() => Object.entries(userChats || {}).filter(([, entry]) => entry?.userInfo), [userChats]);
   const groupCount = chatEntries.filter(([, entry]) => entry.userInfo?.isGroup).length;
@@ -59,28 +70,49 @@ const Profile = () => {
     { label: "Chats", value: chatEntries.length },
     { label: "Groups", value: groupCount },
   ] : [];
-  const memberSince = currentUser?.metadata?.creationTime
-    ? new Date(currentUser.metadata.creationTime).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })
-    : "";
+  const memberSince = formatLongDate(currentUser?.metadata?.creationTime, { year: "numeric", month: "long", day: "numeric" });
+
+  const propagateProfileToChats = async (changes) => {
+    let snapshot;
+    try {
+      snapshot = await getDoc(doc(db, "userChats", currentUser.uid));
+    } catch (error) {
+      console.warn("Could not read chats while refreshing profile details:", error);
+      setError("Your profile was saved, but some chat details could not be refreshed.");
+      return;
+    }
+    if (!snapshot.exists()) return;
+
+    const updatesByUser = new Map();
+    Object.entries(snapshot.data() || {}).forEach(([chatId, entry]) => {
+      const otherUid = entry?.userInfo?.uid;
+      if (!otherUid || entry.userInfo.isGroup || otherUid === currentUser.uid) return;
+      const updates = updatesByUser.get(otherUid) || [];
+      Object.entries(changes).forEach(([field, value]) => {
+        updates.push(new FieldPath(chatId, "userInfo", field), value);
+      });
+      updatesByUser.set(otherUid, updates);
+    });
+
+    const results = await Promise.allSettled(
+      [...updatesByUser.entries()].map(([uid, updates]) =>
+        updateDoc(doc(db, "userChats", uid), ...updates)
+      )
+    );
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length > 0) {
+      failures.forEach((result) => console.warn("Could not refresh a chat profile entry:", result.reason));
+      setError("Your profile was saved, but some chat details could not be refreshed.");
+    }
+  };
 
   const updateAvatar = async (photoURL) => {
     if (!auth.currentUser || !currentUser?.uid || !photoURL) return;
     await updateProfile(auth.currentUser, { photoURL });
     await updateDoc(doc(db, "users", currentUser.uid), { photoURL });
-    try {
-      const userChatsRef = doc(db, "userChats", currentUser.uid);
-      const snapshot = await getDoc(userChatsRef);
-      if (snapshot.exists()) {
-        const updates = {};
-        Object.entries(snapshot.data() || {}).forEach(([chatId, chatEntry]) => {
-          if (chatEntry?.userInfo?.uid === currentUser.uid) updates[`${chatId}.userInfo.photoURL`] = photoURL;
-        });
-        if (Object.keys(updates).length) await updateDoc(userChatsRef, updates);
-      }
-    } catch (cause) {
-      console.warn("Could not update userChats entry:", cause);
-    }
+    mergeCachedUserDocument(currentUser.uid, { photoURL });
     updateAuthUser?.({ photoURL });
+    await propagateProfileToChats({ photoURL });
   };
 
   const saveProfile = async () => {
@@ -94,8 +126,15 @@ const Profile = () => {
     setError("");
     try {
       await updateProfile(auth.currentUser, { displayName });
-      await updateDoc(doc(db, "users", currentUser.uid), { displayName, bio: bioDraft.trim() });
+      const nextBio = bioDraft.trim();
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        displayName,
+        displayNameLower: normalizeSearchText(displayName),
+        bio: nextBio,
+      });
+      mergeCachedUserDocument(currentUser.uid, { displayName, displayNameLower: normalizeSearchText(displayName), bio: nextBio });
       updateAuthUser?.({ displayName });
+      await propagateProfileToChats({ displayName });
       setBioTouched(false);
       if (location.state?.profileEdit && window.history.state?.idx > 0) navigate(-1);
       else navigate("/profile", { replace: true });
@@ -108,15 +147,15 @@ const Profile = () => {
   };
 
   const closeEdit = useCallback(() => {
-    if (dirty && !window.confirm("Discard your unsaved profile changes?")) return;
+    if (!confirmDiscardChanges()) return;
     setNameDraft(currentUser?.displayName || "");
     setBioDraft(userDocument.bio || "");
     setBioTouched(false);
     if (location.state?.profileEdit && window.history.state?.idx > 0) navigate(-1);
     else navigate("/profile", { replace: true });
-  }, [currentUser?.displayName, dirty, location.state?.profileEdit, navigate, userDocument.bio]);
+  }, [confirmDiscardChanges, currentUser?.displayName, location.state?.profileEdit, navigate, userDocument.bio]);
   useEffect(() => {
-    if (!editMode || showAvatarPicker || showLogoutConfirm) return undefined;
+    if (!editMode || showAvatarPicker) return undefined;
     const handleEscape = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -125,51 +164,31 @@ const Profile = () => {
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [closeEdit, editMode, showAvatarPicker, showLogoutConfirm]);
+  }, [closeEdit, editMode, showAvatarPicker]);
   const openEdit = () => navigate("/profile/edit", { state: { profileEdit: true } });
   const backToChats = () => {
     if (location.state?.mobileTabSwitch && window.history.state?.idx > 0) navigate(-1);
     else navigate("/", { replace: true });
   };
 
-  const signOutUser = async () => {
-    try {
-      closeSignOut();
-      await signOut(auth);
-      navigate("/login");
-    } catch (cause) {
-      console.error("Could not sign out:", cause);
-      setError("Could not sign out. Please try again.");
-    }
-  };
-
-  const copyValue = async (value) => {
-    try {
-      await navigator.clipboard.writeText(String(value));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch (cause) {
-      console.error("Could not copy profile information:", cause);
-    }
-  };
-
   const setOverlay = (open) => window.dispatchEvent(new CustomEvent("chathere:mobile-overlay", { detail: { open } }));
-  const openAvatarPicker = () => { setShowAvatarPicker(true); setOverlay(true); };
+  const preloadAvatarPicker = () => {
+    import("../components/AvatarPicker").catch((cause) => console.error("Could not preload avatar picker:", cause));
+  };
+  const openAvatarPicker = () => { preloadAvatarPicker(); setShowAvatarPicker(true); setOverlay(true); };
   const closeAvatarPicker = () => { setShowAvatarPicker(false); setOverlay(false); };
-  const openSignOut = () => { setShowLogoutConfirm(true); setOverlay(true); };
-  const closeSignOut = () => { setShowLogoutConfirm(false); setOverlay(false); };
-
   return <main data-main-scroll className="ember-bg relative h-full overflow-y-auto overscroll-contain tab-scroll-padding">
     <div className="mx-auto w-full max-w-[640px] pb-6">
       <div aria-hidden={editMode}>
-        <ScreenHeader action={<button type="button" onClick={openEdit} className="icon-btn-glass" aria-label="Edit profile"><Edit2 size={18} /></button>}>
+        <ScreenHeader>
           <button type="button" onClick={backToChats} className="desktop-profile-back icon-btn-glass" aria-label="Back to chats"><ArrowLeft size={19} /></button>
         </ScreenHeader>
         {error && <p role="alert" className="mx-6 mb-3 text-sm text-[var(--danger-text)]">{error}</p>}
         <section className="px-5 pb-5 pt-4 text-center">
           <div className="relative mx-auto mb-3 h-[104px] w-[104px] rounded-full border-2 border-[var(--border-strong)]">
-            <Avatar src={currentUser?.photoURL} name={currentUser?.displayName || currentUser?.email || "Profile"} size={100} className="h-full w-full rounded-full" />
-            <button type="button" onClick={openAvatarPicker} className="absolute bottom-0 right-0 inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-[var(--bg)] bg-[var(--primary)] text-[var(--on-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label="Change profile photo"><Camera size={18} /></button>
+            <button type="button" onClick={() => setShowAvatarViewer(true)} className="h-full w-full rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label="View profile photo">
+              <Avatar src={currentUser?.photoURL} name={currentUser?.displayName || currentUser?.email || "Profile"} size={100} className="h-full w-full rounded-full" />
+            </button>
           </div>
           <h2 className="break-words text-[22px] font-bold leading-tight text-[var(--text-1)]">{currentUser?.displayName || "Profile"}</h2>
           <p className="mt-1 truncate text-sm text-[var(--text-2)]">{currentUser?.email || userDocument.bio || ""}</p>
@@ -189,19 +208,6 @@ const Profile = () => {
           </SettingsGroup>
         </Section>
 
-        <Section title="Quick links">
-          <SettingsGroup>
-            <SettingsRow icon={Settings} label="Settings" onClick={() => navigate("/settings", { replace: true, state: location.state?.mobileTabSwitch ? { mobileTabSwitch: true } : null })} />
-            <SettingsRow icon={Archive} label="Archived chats" onClick={() => {
-              navigate("/", { replace: true, state: location.state?.mobileTabSwitch ? { mobileTabSwitch: true } : null });
-              window.setTimeout(() => window.dispatchEvent(new Event("chathere:show-archived")), 0);
-            }} />
-          </SettingsGroup>
-        </Section>
-
-        <Section title="Account">
-          <SettingsGroup><SettingsRow icon={LogOut} label="Sign out" danger onClick={openSignOut} /></SettingsGroup>
-        </Section>
       </div>
       <AnimatePresence>
         {editMode && <motion.div
@@ -214,41 +220,32 @@ const Profile = () => {
           exit={reduceMotion ? undefined : { opacity: 0, x: "100%" }}
           transition={{ duration: reduceMotion ? 0 : .24, ease: "easeOut" }}
         >
-          <div className="mx-auto w-full max-w-[640px] pb-6">
-            <ScreenHeader title="Edit profile">
-              <button type="button" onClick={closeEdit} className="icon-btn-glass" aria-label="Back to profile"><ArrowLeft size={19} /></button>
-            </ScreenHeader>
-            <Section title="Profile details">
-              <SettingsGroup className="p-4">
-                <label className="profile-field-label" htmlFor="profile-name">Display name</label>
-                <input id="profile-name" className="profile-field" maxLength={80} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === "Enter" && saveProfile()} autoComplete="name" autoFocus />
-                <label className="profile-field-label mt-4" htmlFor="profile-about">About</label>
-                <textarea id="profile-about" className="profile-field min-h-28 resize-y" value={bioDraft} onChange={(event) => { setBioTouched(true); setBioDraft(event.target.value); }} maxLength={140} placeholder="Write something about yourself" />
-                <p className="mt-1 text-right text-xs text-[var(--text-2)]" aria-live="polite">{bioDraft.length}/140</p>
-                {error && <p role="alert" className="mt-2 text-sm text-[var(--danger-text)]">{error}</p>}
-                <div className="mt-4 flex gap-2">
-                  <button type="button" onClick={closeEdit} className="chip min-h-11 flex-1 justify-center">Cancel</button>
-                  <button type="button" onClick={saveProfile} disabled={saving} className="ember-primary-action min-h-11 flex-1 rounded-full px-4 text-sm font-semibold disabled:opacity-60">
-                    <Check size={16} className="mr-1 inline" />{saving ? "Saving…" : "Save"}
-                  </button>
-                </div>
-                <button type="button" onClick={openAvatarPicker} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-[var(--border)] text-sm text-[var(--text-1)]"><Camera size={17} />Change profile photo</button>
-              </SettingsGroup>
-            </Section>
-          </div>
+          <Suspense fallback={<div className="mx-auto mt-12 h-48 w-[min(90%,40rem)] animate-pulse rounded-3xl bg-[var(--surface-2)]" aria-label="Loading profile editor" />}>
+            <ProfileEditScreen
+              closeEdit={closeEdit}
+              openAvatarPicker={openAvatarPicker}
+              preloadAvatarPicker={preloadAvatarPicker}
+              currentUser={currentUser}
+              nameDraft={nameDraft}
+              setNameDraft={setNameDraft}
+              bioDraft={bioDraft}
+              setBioDraft={setBioDraft}
+              setBioTouched={setBioTouched}
+              error={error}
+              saveProfile={saveProfile}
+              saving={saving}
+            />
+          </Suspense>
         </motion.div>}
       </AnimatePresence>
     </div>
 
-    {copied && <div role="status" className="fixed bottom-24 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-[var(--surface-3)] px-3 py-2 text-xs font-medium text-[var(--text-1)] shadow-lg"><Check size={13} className="mr-1 inline" />Copied</div>}
-    <AvatarPicker isOpen={showAvatarPicker} onClose={closeAvatarPicker} currentPhotoURL={currentUser?.photoURL} displayName={currentUser?.displayName} onSave={updateAvatar} />
-    <Sheet open={showLogoutConfirm} onClose={closeSignOut} title="Sign out?">
-      <p className="py-2 text-sm text-[var(--text-2)]">Are you sure you want to sign out of ChatHere?</p>
-      <div className="mt-3 flex gap-2">
-        <button type="button" onClick={closeSignOut} className="chip min-h-11 flex-1 justify-center">Cancel</button>
-        <button type="button" onClick={signOutUser} className="min-h-11 flex-1 rounded-full bg-[var(--danger)] text-sm font-semibold text-[var(--on-danger)]">Sign out</button>
-      </div>
-    </Sheet>
+    {copied && <Toast className="bottom-24">Copied</Toast>}
+    {showAvatarPicker && <Suspense fallback={<div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40" aria-label="Loading avatar picker"><div className="glass-card h-64 w-[min(90vw,28rem)] animate-pulse rounded-3xl" /></div>}><AvatarPicker isOpen onClose={closeAvatarPicker} currentPhotoURL={currentUser?.photoURL} displayName={currentUser?.displayName} onSave={updateAvatar} /></Suspense>}
+    {showAvatarViewer && <div role="dialog" aria-modal="true" aria-label="Profile photo" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4" onClick={(event) => event.target === event.currentTarget && setShowAvatarViewer(false)}>
+      <button type="button" onClick={() => setShowAvatarViewer(false)} className="absolute right-4 top-4 icon-btn-glass" aria-label="Close profile photo"><X size={20} /></button>
+      {currentUser?.photoURL && <LazyImage src={currentUser.photoURL} alt={currentUser.displayName || "Profile"} width={1200} height={1200} priority objectFit="contain" className="max-h-full max-w-full rounded-lg" />}
+    </div>}
   </main>;
 };
 

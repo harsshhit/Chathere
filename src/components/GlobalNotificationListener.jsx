@@ -1,11 +1,8 @@
 import { useContext, useEffect, useRef } from "react";
 import { useLocation, matchPath } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext, UserDocumentContext } from "../context/ChatContext";
-import { doc, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
+import { ChatContext, UserChatsContext, UserDocumentContext } from "../context/ChatContexts";
 import { notifyMessage, updateTitleUnread } from "../utils/notify";
-import { registerPushToken } from "../utils/pushToken";
 
 /**
  * Top-level persistent notification and unread counter listener.
@@ -15,6 +12,7 @@ import { registerPushToken } from "../utils/pushToken";
 const GlobalNotificationListener = () => {
   const { currentUser } = useContext(AuthContext);
   const { data: chatContextData } = useContext(ChatContext);
+  const userChats = useContext(UserChatsContext);
   const userDocument = useContext(UserDocumentContext);
   const chatPrefsRef = useRef(userDocument.chatPrefs || {});
   const location = useLocation();
@@ -38,9 +36,15 @@ const GlobalNotificationListener = () => {
   const currentUserId = currentUser?.uid;
 
   useEffect(() => {
-    if (currentUserId && typeof Notification !== "undefined" && Notification.permission === "granted") {
-      registerPushToken({ uid: currentUserId });
-    }
+    if (!currentUserId || typeof Notification === "undefined" || Notification.permission !== "granted") return undefined;
+    let active = true;
+    import("../utils/pushToken")
+      .then(({ registerPushToken }) => {
+        if (active) return registerPushToken({ uid: currentUserId });
+        return undefined;
+      })
+      .catch((error) => console.warn("Could not load push token registration:", error));
+    return () => { active = false; };
   }, [currentUserId]);
 
   // Listen to window focus and visibility to reset tab title
@@ -66,36 +70,34 @@ const GlobalNotificationListener = () => {
 
   useEffect(() => {
     if (!currentUser?.uid) return;
-
     isFirstSnapshotRef.current = true;
     sessionStartTimeRef.current = Date.now();
+    notifiedIdsRef.current = new Set();
+  }, [currentUser?.uid]);
 
-    const unsub = onSnapshot(
-      doc(db, "userChats", currentUser.uid),
-      (docSnap) => {
-        if (!docSnap.exists()) return;
-        const data = docSnap.data() || {};
-
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const data = userChats || {};
+    if (isFirstSnapshotRef.current) {
+        isFirstSnapshotRef.current = false;
         // On initial snapshot load, seed existing message IDs so old history never alerts
-        if (isFirstSnapshotRef.current) {
-          isFirstSnapshotRef.current = false;
-          Object.entries(data).forEach(([cId, cData]) => {
-            const msg = cData?.lastMessage;
-            if (msg) {
-              const msgTime =
-                typeof msg.date === "number"
-                  ? msg.date
-                  : msg.date?.toMillis
-                  ? msg.date.toMillis()
-                  : msg.date?.seconds
-                  ? msg.date.seconds * 1000
-                  : 0;
-              const msgId = msg.id || `${cId}_${msgTime}_${msg.senderId}_${msg.text || ""}`;
-              notifiedIdsRef.current.add(msgId);
-            }
-          });
-          return;
-        }
+        Object.entries(data).forEach(([cId, cData]) => {
+          const msg = cData?.lastMessage;
+          if (msg) {
+            const msgTime =
+              typeof msg.date === "number"
+                ? msg.date
+                : msg.date?.toMillis
+                ? msg.date.toMillis()
+                : msg.date?.seconds
+                ? msg.date.seconds * 1000
+                : 0;
+            const msgId = msg.id || `${cId}_${msgTime}_${msg.senderId}_${msg.text || ""}`;
+            notifiedIdsRef.current.add(msgId);
+          }
+        });
+        return;
+    }
 
         // Process incoming messages across all chats
         Object.entries(data).forEach(([cId, cData]) => {
@@ -135,9 +137,9 @@ const GlobalNotificationListener = () => {
               !document.hasFocus();
             const isDifferentChat = cId !== activeChatIdRef.current;
 
-            // Trigger alert if app is backgrounded, window is unfocused, or user is in a different chat
+            // The service worker owns notifications when this page is hidden or unfocused.
             const isMuted = (chatPrefsRef.current?.[cId]?.mutedUntil || 0) > Date.now();
-            if (!isMuted && (isDocHidden || isWindowUnfocused || isDifferentChat)) {
+            if (!isMuted && !isDocHidden && !isWindowUnfocused && isDifferentChat) {
               const senderName = cData.userInfo?.displayName || "New Message";
               const messageText = newLastMsg.text || "Sent a message";
               const photoURL = cData.userInfo?.photoURL || "/icon-192.png";
@@ -167,16 +169,7 @@ const GlobalNotificationListener = () => {
         ) {
           updateTitleUnread(totalUnread);
         }
-      },
-      (error) => {
-        console.warn("GlobalNotificationListener userChats snapshot error:", error);
-      }
-    );
-
-    return () => {
-      unsub();
-    };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, userChats]);
 
   return null;
 };

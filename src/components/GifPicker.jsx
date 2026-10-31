@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Search, RefreshCw, Image } from "lucide-react";
 import { searchGifs, trendingGifs } from "../services/gifs";
+import LazyImage from "./ui/LazyImage";
+import { ScrollRootProvider } from "../context/ScrollRootContext";
 
 // How many tiles to show per load (max 50 per Klipy docs)
 const PER_PAGE = 20;
 // Debounce delay before firing search
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = 250;
 
 // ── Skeleton tile ────────────────────────────────────────────────────────────
 const SkeletonTile = () => (
@@ -89,7 +91,7 @@ const GifPicker = ({ onGifSelect }) => {
 
   // Infinite scroll via IntersectionObserver on a sentinel div
   useEffect(() => {
-    if (!bottomRef.current || !nextPage || loadingMore) return;
+    if (!bottomRef.current || !nextPage || loadingMore || typeof IntersectionObserver === "undefined") return undefined;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && nextPage && !loadingMore) {
@@ -105,6 +107,7 @@ const GifPicker = ({ onGifSelect }) => {
   const handleRetry = () => fetchGifs(searchTerm);
 
   return (
+    <ScrollRootProvider rootRef={listRef}>
     <div
       className="flex flex-col rounded-xl overflow-hidden"
       style={{
@@ -130,7 +133,7 @@ const GifPicker = ({ onGifSelect }) => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             aria-label="Search KLIPY GIFs"
-            className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg outline-none"
+            className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             style={{
               background: "var(--surface-3)",
               color: "var(--text-primary)",
@@ -192,7 +195,7 @@ const GifPicker = ({ onGifSelect }) => {
             {gifs.map((gif) => (
               <button
                 key={gif.id}
-                onClick={() => onGifSelect(gif.url)}
+                onClick={() => onGifSelect(gif.url, gif)}
                 className="rounded-xl overflow-hidden cursor-pointer transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] touch-action-manipulation"
                 style={{
                   position: "relative",
@@ -201,12 +204,14 @@ const GifPicker = ({ onGifSelect }) => {
                 }}
                 aria-label={`Send GIF`}
               >
-                <img
-                  src={gif.previewUrl}
+                <LazyImage
+                  src={gif.previewUrl || gif.url}
                   alt="GIF"
-                  loading="lazy"
-                  className="absolute inset-0 w-full h-full object-cover"
-                  style={{ display: "block" }}
+                  width={gif.width}
+                  height={gif.height}
+                  sizes="140px"
+                  className="absolute inset-0 h-full w-full"
+                  manualLoadAction="container"
                 />
               </button>
             ))}
@@ -224,6 +229,11 @@ const GifPicker = ({ onGifSelect }) => {
                     ))}
                   </div>
                 )}
+                {typeof IntersectionObserver === "undefined" && !loadingMore && <button
+                  type="button"
+                  onClick={() => fetchGifs(searchTerm, nextPage)}
+                  className="min-h-11 rounded-lg px-4 text-xs font-semibold text-[var(--primary-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                >Load more</button>}
               </div>
             )}
           </div>
@@ -243,6 +253,7 @@ const GifPicker = ({ onGifSelect }) => {
         </span>
       </div>
     </div>
+    </ScrollRootProvider>
   );
 };
 

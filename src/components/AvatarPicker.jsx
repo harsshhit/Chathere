@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Avatar, { isValidAvatarUrl } from "./Avatar";
 import GifPicker from "./GifPicker";
 import { uploadImage } from "../utils/cloudinary";
+import LazyImage from "./ui/LazyImage";
 
 const DICEBEAR_STYLES = [
   { id: "bottts", label: "Robots" },
@@ -221,7 +222,7 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
           >
             <div className="relative">
               {localPreviewUrl ? (
-                <img src={localPreviewUrl} alt={displayName || "Preview"} className="h-[68px] w-[68px] rounded-2xl object-cover shadow-sm" style={{ border: "2px solid var(--primary-glow)" }} />
+                <LazyImage src={localPreviewUrl} alt={displayName || "Preview"} width={68} height={68} className="h-[68px] w-[68px] rounded-2xl shadow-sm" style={{ border: "2px solid var(--primary-glow)" }} />
               ) : (
                 <Avatar
                   src={selectedUrl}
@@ -370,16 +371,17 @@ const AvatarPicker = ({ isOpen, onClose, currentPhotoURL, displayName, onSave })
             {activeTab === "url" && (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>
+                  <label htmlFor="avatar-url" className="block text-xs font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>
                     Paste Direct Image Link (HTTPS only)
                   </label>
                   <div className="relative">
                     <input
+                      id="avatar-url"
                       type="url"
                       value={customUrl}
                       onChange={(e) => handleCustomUrlChange(e.target.value)}
                       placeholder="https://example.com/avatar.png"
-                      className="w-full px-3.5 py-2.5 text-xs rounded-xl outline-none pr-9"
+                      className="w-full px-3.5 py-2.5 text-xs rounded-xl outline-none pr-9 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                       style={{
                         background: "var(--surface-3)",
                         border: urlError

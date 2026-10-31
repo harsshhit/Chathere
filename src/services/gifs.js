@@ -22,18 +22,29 @@ const KEY = process.env.REACT_APP_GIF_API_KEY || "";
 /** Parse a single Klipy GIF item into normalized shape. */
 function parseItem(item) {
   const file = item.file || {};
+  const mp4Src = file.hd?.mp4 || file.md?.mp4 || file.sm?.mp4 || null;
+  const webmSrc = file.hd?.webm || file.md?.webm || file.sm?.webm || null;
   const previewSrc =
     file.xs?.webp || file.xs?.gif ||
     file.sm?.webp || file.sm?.gif ||
     file.md?.gif || file.hd?.gif || {};
   const fullSrc =
     file.hd?.gif || file.md?.gif || file.sm?.gif || {};
-  return {
+  const normalized = {
     id: String(item.id ?? item.slug ?? Math.random()),
     previewUrl: previewSrc.url || "",
     url: fullSrc.url || previewSrc.url || "",
     width: fullSrc.width || previewSrc.width || 320,
     height: fullSrc.height || previewSrc.height || 240,
+  };
+  const mp4Url = typeof mp4Src === "string" ? mp4Src : mp4Src?.url;
+  const webmUrl = typeof webmSrc === "string" ? webmSrc : webmSrc?.url;
+  const gifPreview = previewSrc.url;
+  return {
+    ...normalized,
+    ...(gifPreview ? { gifPreview } : {}),
+    ...(mp4Url ? { gifMp4: mp4Url } : {}),
+    ...(webmUrl ? { gifWebm: webmUrl } : {}),
   };
 }
 

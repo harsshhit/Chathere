@@ -1,6 +1,6 @@
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, FieldPath, onSnapshot, updateDoc } from "firebase/firestore";
 import React, { memo, useContext, useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from "react";
-import { ChatContext } from "../context/ChatContext";
+import { ChatContext } from "../context/ChatContexts";
 import { AuthContext } from "../context/AuthContext";
 import { db } from "../firebase";
 import Message from "./Message";
@@ -8,6 +8,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { usePendingMessages, pendingMessagesStore } from "../utils/pendingMessages";
 import { publishChatMessages } from "../utils/chatMessagesStore";
+import { formatDayLabel } from "../utils/formatters";
+import { ScrollRootProvider } from "../context/ScrollRootContext";
+import { releaseOwnMediaForChat } from "../utils/ownMediaCache";
 
 const messageTime = (message) => {
   const date = message?.date;
@@ -17,26 +20,37 @@ const messageTime = (message) => {
   return Number(date) || 0;
 };
 
-const dayLabel = (timestamp) => {
-  const date = new Date(timestamp);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return "Today";
-  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return date.toLocaleDateString([], { month: "long", day: "numeric" });
-};
+const isVoiceMessage = (message) => Boolean(
+  message &&
+  message.type !== "deleted" &&
+  !message.deleted &&
+  !message.deletedAt &&
+  (message.type === "audio" || message.audio?.url || message.file?.mime?.startsWith("audio/"))
+);
 
 const Messages = () => {
   const [messages, setMessages] = useState([]);
+  const [messagesError, setMessagesError] = useState("");
   const [reactions, setReactions] = useState({});
   const [liveMessageIds, setLiveMessageIds] = useState(() => new Set());
   const [typing, setTyping] = useState({});
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === "visible");
   const [lastRead, setLastRead] = useState({});
   const { data } = useContext(ChatContext);
   const { currentUser } = useContext(AuthContext);
 
   const pendingMessages = usePendingMessages(data.chatId);
+  useEffect(() => {
+    const updateVisibility = () => setDocumentVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+  useEffect(() => {
+    const activeChatId = data.chatId;
+    return () => {
+      if (activeChatId) releaseOwnMediaForChat(activeChatId);
+    };
+  }, [data.chatId]);
 
   // Merge server messages with optimistic pending messages (filter out any already arrived on server)
   const serverMsgIds = useMemo(() => new Set(messages.map((m) => m.id)), [messages]);
@@ -57,7 +71,7 @@ const Messages = () => {
       const timestamp = messageTime(message);
       const day = timestamp ? new Date(timestamp).toDateString() : "";
       if (day && day !== lastDay) {
-        entries.push({ type: "date", key: `date-${day}`, label: dayLabel(timestamp) });
+        entries.push({ type: "date", key: `date-${day}`, label: formatDayLabel(timestamp) });
         lastDay = day;
       }
 
@@ -128,6 +142,11 @@ const Messages = () => {
         type: "message",
         key: message.id || index,
         message,
+        nextVoiceMessage: isVoiceMessage(message) &&
+          isVoiceMessage(next) &&
+          next.senderId === message.senderId
+          ? next
+          : null,
         showGroupSenderName: Boolean(data.user?.isGroup) && !samePreviousRun,
         showGroupAvatar: Boolean(data.user?.isGroup) && !sameNextRun && message.senderId !== currentUser.uid,
         rowGap: sameNextRun ? "2px" : "12px",
@@ -136,6 +155,12 @@ const Messages = () => {
     }
     return entries;
   }, [displayMessages, data.user?.isGroup, currentUser.uid]);
+  const priorityImageKeys = new Set(
+    renderEntries
+      .filter((entry) => entry.type === "stack" || Boolean(entry.message?.img))
+      .slice(-2)
+      .map((entry) => entry.key)
+  );
 
   useEffect(() => {
     publishChatMessages(data.chatId, displayMessages);
@@ -158,6 +183,7 @@ const Messages = () => {
   const scrollTimeoutRef = useRef(null);
   const isHoveringRef = useRef(false);
   const isAutoScrollingRef = useRef(false);
+  const lastReadWriteRef = useRef({ chatId: null, lastWriteAt: 0 });
 
   const markAsReadIfFocused = useCallback((newMessages, currentLastRead) => {
     const isVisible = typeof document === "undefined" || document.visibilityState === "visible";
@@ -165,11 +191,27 @@ const Messages = () => {
       const latestMsg = newMessages[newMessages.length - 1];
       if (latestMsg.senderId !== currentUser.uid) {
         const myLastRead = currentLastRead?.[currentUser.uid];
-        const latestMsgTime = latestMsg.date?.toMillis ? latestMsg.date.toMillis() : Date.now();
-        if (!myLastRead || myLastRead < latestMsgTime) {
-          updateDoc(doc(db, "chats", data.chatId), {
-            [`lastRead.${currentUser.uid}`]: Date.now()
-          }).catch(console.error);
+        const latestMsgTime = messageTime(latestMsg) || Date.now();
+        const lastReadTime = messageTime({ date: myLastRead });
+        const now = Date.now();
+        if (lastReadWriteRef.current.chatId !== data.chatId) {
+          lastReadWriteRef.current = { chatId: data.chatId, lastWriteAt: 0 };
+        }
+        if (
+          lastReadTime < latestMsgTime &&
+          now - lastReadWriteRef.current.lastWriteAt >= 2000
+        ) {
+          lastReadWriteRef.current.lastWriteAt = now;
+          updateDoc(
+            doc(db, "chats", data.chatId),
+            new FieldPath("lastRead", currentUser.uid),
+            now
+          ).catch((error) => {
+            if (lastReadWriteRef.current.chatId === data.chatId) {
+              lastReadWriteRef.current.lastWriteAt = 0;
+            }
+            console.error("Could not update last-read state:", error);
+          });
         }
       }
     }
@@ -195,7 +237,9 @@ const Messages = () => {
       wasNearBottomRef.current = true;
       previousMessagesLength.current = 0;
       loadedChatId.current = data.chatId;
+      lastReadWriteRef.current = { chatId: data.chatId, lastWriteAt: 0 };
       setMessages([]);
+      setMessagesError("");
       setReactions({});
       setLiveMessageIds(new Set());
       observedMessageIdsRef.current = new Set();
@@ -209,6 +253,7 @@ const Messages = () => {
     }
 
     const unSub = onSnapshot(doc(db, "chats", data.chatId), (documentSnapshot) => {
+      setMessagesError("");
       if (documentSnapshot.exists()) {
         const docData = documentSnapshot.data();
         const newMessages = docData.messages || [];
@@ -247,7 +292,15 @@ const Messages = () => {
         }
 
         markAsReadIfFocused(newMessages, currentLastRead);
+      } else {
+        setMessages([]);
+        setReactions({});
+        setTyping({});
+        setLastRead({});
       }
+    }, (error) => {
+      console.error("Chat messages snapshot error:", error);
+      setMessagesError("Messages could not be loaded. Check your connection and try again.");
     });
 
     return () => unSub();
@@ -482,6 +535,7 @@ const Messages = () => {
   }, [isNearBottom, scrollToBottomInstant]);
 
   return (
+    <ScrollRootProvider rootRef={containerRef}>
     <div className="relative flex-1 min-h-0 w-full h-full overflow-hidden flex flex-col">
       <div
         ref={containerRef}
@@ -490,6 +544,11 @@ const Messages = () => {
         style={{ overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}
       >
         <div ref={contentRef} className="min-h-full flex flex-col">
+          {messagesError && (
+            <p role="alert" className="mb-3 text-center text-sm text-[var(--danger-text)]">
+              {messagesError}
+            </p>
+          )}
           {displayMessages.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
@@ -520,6 +579,7 @@ const Messages = () => {
                     showGroupSenderName={entry.showGroupSenderName}
                     showGroupAvatar={entry.showGroupAvatar}
                     rowGap={entry.rowGap}
+                    priority={priorityImageKeys.has(entry.key)}
                   />
                 );
               }
@@ -530,9 +590,11 @@ const Messages = () => {
                   lastRead={lastRead}
                   reactions={reactions?.[entry.message.id] || {}}
                   isLive={entry.message.status === "sending" || liveMessageIds.has(entry.message.id)}
+                  nextVoiceMessage={entry.nextVoiceMessage}
                   showGroupSenderName={entry.showGroupSenderName}
                   showGroupAvatar={entry.showGroupAvatar}
                   rowGap={entry.rowGap}
+                  priority={priorityImageKeys.has(entry.key)}
                 />
               );
             })
@@ -545,18 +607,18 @@ const Messages = () => {
                 <div className="msg-bubble-received flex items-center gap-1.5 rounded-full px-4 py-2.5">
                   <motion.div
                     className="typing-dot"
-                    animate={{ y: [0, -4, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.6, delay: 0 }}
+                    animate={documentVisible ? { y: [0, -4, 0] } : { y: 0 }}
+                    transition={{ repeat: documentVisible ? Infinity : 0, duration: 0.6, delay: 0 }}
                   />
                   <motion.div
                     className="typing-dot"
-                    animate={{ y: [0, -4, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }}
+                    animate={documentVisible ? { y: [0, -4, 0] } : { y: 0 }}
+                    transition={{ repeat: documentVisible ? Infinity : 0, duration: 0.6, delay: 0.2 }}
                   />
                   <motion.div
                     className="typing-dot"
-                    animate={{ y: [0, -4, 0] }}
-                    transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }}
+                    animate={documentVisible ? { y: [0, -4, 0] } : { y: 0 }}
+                    transition={{ repeat: documentVisible ? Infinity : 0, duration: 0.6, delay: 0.4 }}
                   />
                 </div>
               </div>
@@ -597,6 +659,7 @@ const Messages = () => {
         )}
       </AnimatePresence>
     </div>
+    </ScrollRootProvider>
   );
 };
 

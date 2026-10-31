@@ -23,7 +23,8 @@ const InstallBanner = () => {
         }
       }
       setIsDismissed(false);
-    } catch {
+    } catch (error) {
+      console.warn("Could not read install prompt dismissal:", error);
       setIsDismissed(false);
     }
   }, []);
@@ -32,8 +33,8 @@ const InstallBanner = () => {
     setIsDismissed(true);
     try {
       localStorage.setItem(DISMISS_KEY, Date.now().toString());
-    } catch (e) {
-      // Ignore localStorage errors
+    } catch (error) {
+      console.warn("Could not save install prompt dismissal:", error);
     }
   };
 
@@ -110,7 +111,7 @@ const InstallBanner = () => {
                 type="button"
                 onClick={handleInstallClick}
                 disabled={isPrompting}
-                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
+                className="px-2.5 py-1 text-[11px] font-semibold text-[var(--on-primary)] rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
                 style={{ touchAction: "manipulation" }}
               >
                 {isPrompting ? "..." : "Install"}

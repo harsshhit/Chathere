@@ -9,17 +9,27 @@ import {
   isStandalone,
 } from "../utils/notify";
 
-const NotificationBanner = () => {
+const DISMISS_KEY = "chathere-notification-banner-dismissed";
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+const NotificationBanner = ({ onVisibilityChange }) => {
   const { currentUser } = useContext(AuthContext);
   const [dismissed, setDismissed] = useState(true);
   const [permissionState, setPermissionState] = useState("granted");
+  const [initialized, setInitialized] = useState(false);
   const [isIOSNonStandalone, setIsIOSNonStandalone] = useState(false);
   const [isRequesting, setIsRequesting] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const isDismissed = sessionStorage.getItem("chathere-notification-banner-dismissed") === "true";
+    let isDismissed = false;
+    try {
+      const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) || 0);
+      isDismissed = dismissedAt > 0 && Date.now() - dismissedAt < SEVEN_DAYS_MS;
+    } catch (error) {
+      console.warn("Could not read notification prompt dismissal:", error);
+    }
     const currentPerm = getPermissionState();
     const iosNonStandalone = isIOS() && !isStandalone();
 
@@ -32,14 +42,20 @@ const NotificationBanner = () => {
     if (!isDismissed && (iosNonStandalone || currentPerm === "default")) {
       setDismissed(false);
     }
+    setInitialized(true);
   }, []);
+
+  const shouldShow = initialized && !dismissed && permissionState !== "granted" && permissionState !== "denied";
+  useEffect(() => {
+    onVisibilityChange?.(shouldShow);
+  }, [onVisibilityChange, shouldShow]);
 
   const handleDismiss = () => {
     setDismissed(true);
     try {
-      sessionStorage.setItem("chathere-notification-banner-dismissed", "true");
-    } catch (e) {
-      // Ignore storage error
+      localStorage.setItem(DISMISS_KEY, Date.now().toString());
+    } catch (error) {
+      console.warn("Could not save notification prompt dismissal:", error);
     }
   };
 
@@ -58,7 +74,7 @@ const NotificationBanner = () => {
     }
   };
 
-  if (dismissed || permissionState === "granted" || permissionState === "denied") {
+  if (!shouldShow) {
     return null;
   }
 
@@ -114,7 +130,7 @@ const NotificationBanner = () => {
               <button
                 onClick={handleEnable}
                 disabled={isRequesting}
-                className="px-2.5 py-1 text-[11px] font-semibold text-white rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
+                className="px-2.5 py-1 text-[11px] font-semibold text-[var(--on-primary)] rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-sm disabled:opacity-50"
                 style={{ touchAction: "manipulation" }}
               >
                 {isRequesting ? "..." : "Enable"}

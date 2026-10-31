@@ -1,15 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useState } from "react";
 import { AnimatePresence } from "framer-motion";
+import { useLocation } from "react-router-dom";
 import Navbar from "./Navbar";
 import Search from "./Search";
 import Chats from "./Chats";
 import NotificationBanner from "./NotificationBanner";
 import InstallBanner from "./InstallBanner";
-import CreateGroup from "./CreateGroup";
+
+const CreateGroup = lazy(() => import("./CreateGroup"));
 
 const Sidebar = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [notificationPromptVisible, setNotificationPromptVisible] = useState(true);
+  const location = useLocation();
+  const showPrompts = location.pathname === "/" || location.pathname.startsWith("/chat/");
 
   useEffect(() => {
     const openGroup = () => {
@@ -37,19 +42,19 @@ const Sidebar = () => {
       >
         <Search isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
       </div>
-      <div className="flex-shrink-0">
-        <InstallBanner />
-        <NotificationBanner />
-      </div>
+      {showPrompts && <div className="flex-shrink-0">
+        <NotificationBanner onVisibilityChange={setNotificationPromptVisible} />
+        {!notificationPromptVisible && <InstallBanner />}
+      </div>}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <Chats />
       </div>
 
       <AnimatePresence>
-        {showGroupModal && <CreateGroup onClose={() => {
+        {showGroupModal && <Suspense fallback={<div className="fixed inset-0 z-[80] bg-black/40 p-4" aria-label="Loading group creation"><div className="glass-card mx-auto mt-[20vh] h-64 max-w-md animate-pulse rounded-3xl" /></div>}><CreateGroup onClose={() => {
           setShowGroupModal(false);
           window.dispatchEvent(new CustomEvent("chathere:mobile-overlay", { detail: { open: false } }));
-        }} />}
+        }} /></Suspense>}
       </AnimatePresence>
     </div>
   );

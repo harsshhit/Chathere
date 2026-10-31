@@ -1,6 +1,11 @@
 const admin = require("firebase-admin");
 
 let firebaseApp;
+const rateLimitsByUid = new Map();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_NOTIFY_REQUESTS_PER_WINDOW = 60;
+const MAX_REQUEST_BYTES = 16 * 1024;
+const MAX_RECIPIENTS = 50;
 
 const getFirebaseApp = () => {
   if (firebaseApp) return firebaseApp;
@@ -21,6 +26,22 @@ const getFirebaseApp = () => {
 
 const hasChat = (userChats, chatId) =>
   Object.prototype.hasOwnProperty.call(userChats, chatId);
+
+const isRateLimited = (uid) => {
+  const now = Date.now();
+  const current = rateLimitsByUid.get(uid);
+  if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitsByUid.set(uid, { startedAt: now, count: 1 });
+    if (rateLimitsByUid.size > 1000) {
+      const oldestUid = rateLimitsByUid.keys().next().value;
+      rateLimitsByUid.delete(oldestUid);
+    }
+    return false;
+  }
+  if (current.count >= MAX_NOTIFY_REQUESTS_PER_WINDOW) return true;
+  current.count += 1;
+  return false;
+};
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
@@ -43,20 +64,48 @@ module.exports = async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const requestBody =
-      typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    if (isRateLimited(decodedToken.uid)) {
+      res.setHeader("Retry-After", String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)));
+      return res.status(429).json({ error: "Too many notification requests" });
+    }
+
+    const declaredLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
+      return res.status(413).json({ error: "Request body is too large" });
+    }
+    if (
+      typeof req.body === "string" &&
+      Buffer.byteLength(req.body, "utf8") > MAX_REQUEST_BYTES
+    ) {
+      return res.status(413).json({ error: "Request body is too large" });
+    }
+
+    let requestBody;
+    try {
+      requestBody = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    } catch {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+    if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+    if (Buffer.byteLength(JSON.stringify(requestBody), "utf8") > MAX_REQUEST_BYTES) {
+      return res.status(413).json({ error: "Request body is too large" });
+    }
+
     const { chatId, recipientUids, title, body } = requestBody || {};
     let invalidField = null;
-    if (typeof chatId !== "string" || !chatId) {
+    if (typeof chatId !== "string" || !chatId || chatId.length > 200) {
       invalidField = "chatId";
     } else if (
       !Array.isArray(recipientUids) ||
-      recipientUids.some((uid) => typeof uid !== "string")
+      recipientUids.length > MAX_RECIPIENTS ||
+      recipientUids.some((uid) => typeof uid !== "string" || !uid || uid.length > 128)
     ) {
       invalidField = "recipientUids";
-    } else if (typeof title !== "string") {
+    } else if (typeof title !== "string" || title.length > 120) {
       invalidField = "title";
-    } else if (typeof body !== "string") {
+    } else if (typeof body !== "string" || body.length > 1000) {
       invalidField = "body";
     }
     if (invalidField) {
@@ -71,9 +120,7 @@ module.exports = async (req, res) => {
       return res.status(403).json({ error: "Chat access denied" });
     }
 
-    const candidates = [...new Set(recipientUids)]
-      .filter((uid) => uid && uid !== senderUid)
-      .slice(0, 50);
+    const candidates = [...new Set(recipientUids)].filter((uid) => uid !== senderUid);
     const authorizedRecipients = await Promise.all(
       candidates.map(async (uid) => {
         const [chatDoc, userDoc] = await Promise.all([
@@ -154,18 +201,22 @@ module.exports = async (req, res) => {
     }
 
     const fieldValue = admin.firestore.FieldValue;
-    await Promise.allSettled(
+    const cleanupResults = await Promise.allSettled(
       [...deadTokensByUid.entries()].map(([uid, tokens]) =>
         db.collection("fcmTokens").doc(uid).update({
           tokens: fieldValue.arrayRemove(...tokens),
         })
       )
     );
+    const cleanupFailures = cleanupResults.filter((result) => result.status === "rejected");
+    if (cleanupFailures.length > 0) {
+      console.warn("Could not remove invalid push tokens:", cleanupFailures.length);
+    }
 
     console.info("notify sent/failed:", sent, failed);
     return res.status(200).json({ sent, failed, errorCodes: [...errorCodes] });
   } catch (error) {
-    console.error("notify error:", error && error.code, error && error.message);
+    console.error("notify error:", error && error.code);
     return res.status(500).json({ error: "Notification request failed" });
   }
 };

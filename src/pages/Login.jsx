@@ -1,11 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "../firebase";
+import { auth, googleProvider } from "../firebaseApp";
 import { Lock, Mail, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
-import { db } from "../firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 
 const Login = () => {
   const [err, setErr] = useState(false);
@@ -45,7 +43,7 @@ const Login = () => {
       if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
         setErrMsg("Invalid email or password.");
       } else if (err.code === "auth/user-not-found") {
-        setErrMsg("No account found with this email.");
+        setErrMsg("Invalid email or password.");
       } else if (err.code === "auth/too-many-requests") {
         setErrMsg("Too many failed attempts. Please try again later.");
       } else {
@@ -63,16 +61,26 @@ const Login = () => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
-      const userDoc = await getDoc(doc(db, "users", user.uid));
+      const [{ db }, { doc, getDoc, setDoc }] = await Promise.all([
+        import("../firebase"),
+        import("firebase/firestore"),
+      ]);
+      const userRef = doc(db, "users", user.uid);
+      const userChatsRef = doc(db, "userChats", user.uid);
+      const [userDoc, userChatsDoc] = await Promise.all([
+        getDoc(userRef),
+        getDoc(userChatsRef),
+      ]);
       if (!userDoc.exists()) {
-        await setDoc(doc(db, "users", user.uid), {
+        const userData = Object.fromEntries(Object.entries({
           uid: user.uid,
           displayName: user.displayName,
           email: user.email,
           photoURL: user.photoURL,
-        });
-        await setDoc(doc(db, "userChats", user.uid), {});
+        }).filter(([, value]) => value !== undefined));
+        await setDoc(userRef, userData, { merge: true });
       }
+      if (!userChatsDoc.exists()) await setDoc(userChatsRef, {}, { merge: true });
       navigate("/");
     } catch (error) {
       setErr(true);

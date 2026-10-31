@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { optimizeUrl } from "../utils/cloudinary";
+import { avatarUrl } from "../utils/cloudinary";
+import { getInitials } from "../utils/formatters";
+import LazyImage from "./ui/LazyImage";
 
 /**
  * Validate that an avatar URL is a secure https URL under 2000 chars.
@@ -21,14 +22,6 @@ export function isValidAvatarUrl(url) {
 /**
  * Extract 1-2 uppercase initials from a user's display name.
  */
-function getInitials(name) {
-  if (!name || typeof name !== "string") return "?";
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
 function getAvatarBackground() {
   return "var(--primary-soft)";
 }
@@ -44,13 +37,6 @@ function getAvatarBackground() {
  * - Fallback: graceful initials fallback on dead/blocked images or invalid URLs
  */
 const Avatar = ({ src, name, alt, size, className = "", style = {} }) => {
-  const [hasError, setHasError] = useState(false);
-
-  // Reset error state if src changes
-  useEffect(() => {
-    setHasError(false);
-  }, [src]);
-
   const displayName = (name || alt || "User").trim();
   const initials = getInitials(displayName);
   const isValidUrl = isValidAvatarUrl(src);
@@ -65,9 +51,12 @@ const Avatar = ({ src, name, alt, size, className = "", style = {} }) => {
     ...sizeStyle,
     ...style,
   };
+  const numericSize = typeof size === "number"
+    ? size
+    : Number.parseFloat(size) || 48;
 
   // If URL is invalid or failed to load, display initials fallback
-  if (!isValidUrl || hasError) {
+  if (!isValidUrl) {
     return (
       <div
         role="img"
@@ -85,17 +74,27 @@ const Avatar = ({ src, name, alt, size, className = "", style = {} }) => {
     );
   }
 
-  return (
-    <img
-      src={optimizeUrl(src, 96)}
-      alt={displayName}
-      referrerPolicy="no-referrer"
-      loading="lazy"
-      onError={() => setHasError(true)}
-      className={`object-cover flex-shrink-0 ${className}`}
-      style={combinedStyle}
-    />
-  );
+  return <LazyImage
+    src={avatarUrl(src, numericSize * 2)}
+    alt={displayName}
+    width={numericSize}
+    height={numericSize}
+    sizes={`${numericSize}px`}
+    widths={[numericSize * 2]}
+    className={`flex-shrink-0 rounded-full ${className}`}
+    style={combinedStyle}
+    manualLoadAction="container"
+    fallbackContent={<div
+      role="img"
+      aria-label={displayName}
+      className={`absolute inset-0 inline-flex items-center justify-center overflow-hidden rounded-full bg-[var(--primary-soft)] font-bold text-[var(--text-1)] select-none ${className}`}
+      style={{
+        fontSize: `${Math.max(10, numericSize * 0.38)}px`,
+        lineHeight: 1,
+        ...combinedStyle,
+      }}
+    ><span>{initials}</span></div>}
+  />;
 };
 
 export default Avatar;

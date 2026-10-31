@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import Sidebar from "../components/Sidebar";
-import Chat from "../components/Chat";
+
+const Chat = lazy(() => import("../components/Chat"));
+const ChatFallback = () => <div className="h-full animate-pulse bg-[var(--surface-2)]" aria-label="Loading conversation" />;
 
 const Home = ({ mobileRootOnly = false }) => {
   const location = useLocation();
@@ -90,7 +92,7 @@ const Home = ({ mobileRootOnly = false }) => {
               className="absolute inset-0 w-full h-full overflow-hidden"
               style={{ willChange: "transform" }}
             >
-              <Chat />
+              <Suspense fallback={<ChatFallback />}><Chat /></Suspense>
             </motion.div>
           ) : (
             <motion.div
@@ -118,7 +120,7 @@ const Home = ({ mobileRootOnly = false }) => {
             <Sidebar />
           </div>
           <div className="flex-1 h-full min-w-0">
-            <Chat />
+            <Suspense fallback={<ChatFallback />}><Chat /></Suspense>
           </div>
         </div>
       )}

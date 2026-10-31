@@ -73,11 +73,30 @@ export const pendingMessagesStore = {
     }
   },
 
+  updateMessage: (chatId, messageId, changes) => {
+    if (!chatId || !pendingByChat[chatId] || !changes) return;
+    let changed = false;
+    const nextList = pendingByChat[chatId].map((message) => {
+      if (message.id !== messageId) return message;
+      changed = true;
+      return { ...message, ...changes };
+    });
+    if (!changed) return;
+    pendingByChat = { ...pendingByChat, [chatId]: nextList };
+    notifyListeners();
+  },
+
   clearChat: (chatId) => {
     if (!chatId || !pendingByChat[chatId]) return;
     const next = { ...pendingByChat };
     delete next[chatId];
     pendingByChat = next;
+    notifyListeners();
+  },
+
+  clearAll: () => {
+    if (Object.keys(pendingByChat).length === 0) return;
+    pendingByChat = {};
     notifyListeners();
   },
 

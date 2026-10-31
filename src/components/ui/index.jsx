@@ -1,6 +1,12 @@
 import React, { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ChevronRight, X } from "lucide-react";
+import { Check, ChevronRight, X } from "lucide-react";
+
+export function Toast({ children, icon: Icon = Check, className = "" }) {
+  return <div role="status" className={`fixed left-1/2 z-[80] -translate-x-1/2 rounded-full bg-[var(--surface-3)] px-3 py-2 text-xs font-medium text-[var(--text-1)] shadow-lg ${className}`}>
+    <Icon size={13} className="mr-1 inline" />{children}
+  </div>;
+}
 
 export function ScreenHeader({ title, action, children }) {
   return <header className="screen-header safe-top">

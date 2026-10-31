@@ -1,16 +1,61 @@
-import React, { useContext, useState, useEffect, useRef } from "react";
+import React, { memo, useCallback, useContext, useDeferredValue, useState, useEffect, useRef } from "react";
 import {
   collection,
   query,
   getDocs,
+  where,
+  limit,
 } from "firebase/firestore";
 import { Search as SearchIcon, UserPlus, Loader2, X } from "lucide-react";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext } from "../context/ChatContext";
+import { ChatContext } from "../context/ChatContexts";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import Avatar from "./Avatar";
+import { normalizeSearchText } from "../utils/searchableName";
+
+const SearchResult = memo(function SearchResult({ user, onSelect }) {
+  return <motion.li
+    initial={{ opacity: 0, x: -10 }}
+    animate={{ opacity: 1, x: 0 }}
+    className="search-result"
+  >
+    <button type="button" onClick={() => onSelect(user)} className="search-result-button">
+      <Avatar
+        src={user.photoURL}
+        alt={user.displayName}
+        className="h-10 w-10 flex-shrink-0 rounded-full object-cover"
+        style={{ border: "1px solid var(--border-strong)" }}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-[var(--text-primary)]">
+          {user.displayName}
+        </span>
+        {user.bio && <span className="block truncate text-xs text-[var(--text-muted)]">{user.bio}</span>}
+      </span>
+      <UserPlus size={17} className="flex-shrink-0 text-[var(--primary-text)]" />
+    </button>
+  </motion.li>;
+});
+
+const getUserSearchResults = async (searchTerm, currentUserId) => {
+  const safeTerm = normalizeSearchText(searchTerm);
+  if (!safeTerm || !currentUserId) return [];
+
+  const searchQuery = query(
+    collection(db, "users"),
+    where("displayNameLower", ">=", safeTerm),
+    where("displayNameLower", "<=", `${safeTerm}\uf8ff`),
+    limit(25)
+  );
+
+  const snapshot = await getDocs(searchQuery);
+  return snapshot.docs
+    .map((userDoc) => userDoc.data())
+    .filter((userData) => userData?.uid && userData.uid !== currentUserId)
+    .slice(0, 25);
+};
 
 const Search = ({ isOpen = true, onClose }) => {
   const [username, setUsername] = useState("");
@@ -18,6 +63,7 @@ const Search = ({ isOpen = true, onClose }) => {
   const [err, setErr] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
+  const deferredUsername = useDeferredValue(username);
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch } = useContext(ChatContext);
@@ -28,49 +74,41 @@ const Search = ({ isOpen = true, onClose }) => {
   }, [isOpen]);
 
   useEffect(() => {
+    let active = true;
     const searchUsers = async () => {
-      if (!username.trim()) {
+      const searchTerm = normalizeSearchText(deferredUsername);
+      if (!searchTerm || !currentUser?.uid) {
         setUsers([]);
         setErr(false);
-        return;
+        setLoading(false);
+        return undefined;
       }
 
       setLoading(true);
       try {
-        const usersRef = collection(db, "users");
-        const q = query(usersRef);
-        const querySnapshot = await getDocs(q);
+        const searchResults = await getUserSearchResults(searchTerm, currentUser.uid);
 
-        const searchResults = [];
-        querySnapshot.forEach((doc) => {
-          const userData = doc.data();
-          if (
-            userData.displayName &&
-            userData.displayName.toLowerCase().includes(username.toLowerCase()) &&
-            userData.uid !== currentUser.uid
-          ) {
-            searchResults.push(userData);
-          }
-        });
-
+        if (!active) return;
         setUsers(searchResults);
         setErr(searchResults.length === 0);
         setLoading(false);
       } catch (err) {
+        if (!active) return;
         console.error(err);
         setErr(true);
         setLoading(false);
       }
     };
 
-    const debounceTimer = setTimeout(() => {
-      searchUsers();
-    }, 300);
+    const debounceTimer = setTimeout(searchUsers, 250);
 
-    return () => clearTimeout(debounceTimer);
-  }, [username, currentUser.uid]);
+    return () => {
+      active = false;
+      clearTimeout(debounceTimer);
+    };
+  }, [deferredUsername, currentUser?.uid]);
 
-  const handleSelect = (selectedUser) => {
+  const handleSelect = useCallback((selectedUser) => {
     dispatch({ type: "CHANGE_USER", payload: selectedUser });
     // Derive the same chatId the reducer would compute
     const derivedChatId = selectedUser.isGroup
@@ -81,7 +119,7 @@ const Search = ({ isOpen = true, onClose }) => {
     navigate(`/chat/${derivedChatId}`);
     setUsers([]);
     setUsername("");
-  };
+  }, [currentUser.uid, dispatch, navigate]);
 
   return (
     <div className="px-4 pb-3 pt-1">
@@ -155,34 +193,7 @@ const Search = ({ isOpen = true, onClose }) => {
             exit={{ opacity: 0 }}
             className="mt-2 space-y-1"
           >
-            {users.map((user) => (
-              <motion.li
-                key={user.uid}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="search-result"
-              >
-                <button type="button" onClick={() => handleSelect(user)} className="search-result-button">
-                  <Avatar
-                    src={user.photoURL}
-                    alt={user.displayName}
-                    className="h-10 w-10 flex-shrink-0 rounded-full object-cover"
-                    style={{ border: "1px solid var(--border-strong)" }}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-[var(--text-primary)]">
-                      {user.displayName}
-                    </span>
-                    {user.bio && (
-                      <span className="block truncate text-xs text-[var(--text-muted)]">
-                        {user.bio}
-                      </span>
-                    )}
-                  </span>
-                  <UserPlus size={17} className="flex-shrink-0 text-[var(--primary-text)]" />
-                </button>
-              </motion.li>
-            ))}
+            {users.map((user) => <SearchResult key={user.uid} user={user} onSelect={handleSelect} />)}
           </motion.ul>
         )}
       </AnimatePresence>

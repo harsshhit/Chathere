@@ -22,7 +22,7 @@ const NotFound = () => {
         </p>
         <Link
           to="/"
-          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-all duration-200 shadow-[0_8px_24px_var(--primary-glow)]"
+          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold text-[var(--on-primary)] bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-all duration-200 shadow-[0_8px_24px_var(--primary-glow)]"
         >
           <Home size={16} />
           Back to ChatHere Home

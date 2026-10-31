@@ -19,3 +19,8 @@ export const subscribeChatMessages = (chatId, listener) => {
     if (chatListeners.size === 0) listeners.delete(chatId);
   };
 };
+
+export const clearAllChatMessages = () => {
+  messageSnapshots.clear();
+  listeners.forEach((chatListeners) => chatListeners.forEach((listener) => listener()));
+};

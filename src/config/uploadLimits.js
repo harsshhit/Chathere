@@ -24,4 +24,5 @@ export const BLOCKED_EXTENSIONS = [
   "jar",
   "vbs",
   "ps1",
+  "svg",
 ];

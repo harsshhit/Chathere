@@ -1,51 +1,38 @@
-import React, { memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { deleteField, doc, FieldPath, getDoc, updateDoc } from "firebase/firestore";
+import React, { lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, CalendarDays, Check, ChevronDown,
-  ChevronLeft, ChevronRight, Download, File, FileAudio, FileImage, FileVideo, Info,
-  Link as LinkIcon, Mail, MessageCircle, MoreHorizontal, Play, Users, X,
+  Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, CalendarDays, ChevronDown,
+  ChevronRight, Download, File, FileAudio, FileImage, FileVideo, Info,
+  Link as LinkIcon, Mail, MessageCircle, MoreHorizontal, Play, Users,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext, ContactPanelContext, UserChatsContext, UserDocumentContext } from "../context/ChatContext";
-import { db } from "../firebase";
+import { ChatContext, ContactPanelActionsContext, ContactPanelContext, UserChatsMetadataContext, UserDocumentContext } from "../context/ChatContexts";
 import Avatar from "./Avatar";
-import { optimizeUrl } from "../utils/cloudinary";
+import { cloudinaryUrl, posterUrl } from "../utils/cloudinary";
 import { getChatMessages, subscribeChatMessages } from "../utils/chatMessagesStore";
+import { formatFileSize, formatLongDate, formatTime, toDate } from "../utils/formatters";
+import { Toast } from "./ui";
+import useCopyToClipboard from "../utils/useCopyToClipboard";
+import { saveChatPreference as writeChatPreference, saveMutePreference } from "../utils/chatPreferences";
+import VoiceMessage from "./VoiceMessage";
+import LazyImage from "./ui/LazyImage";
+import { ScrollRootProvider } from "../context/ScrollRootContext";
+import { getUserDocument } from "../utils/userDocumentCache";
+import { safeHttpUrl } from "../utils/safeUrl";
 
-const userCache = new Map();
 const TAB_PAGE_SIZE = 60;
+const ContactMediaViewer = lazy(() => import("./ContactMediaViewer"));
+const preloadMediaViewer = () => import("./ContactMediaViewer").catch((error) => console.error("Could not preload media viewer:", error));
 
-const dateValue = (value) => {
-  if (!value) return null;
-  if (typeof value.toDate === "function") return value.toDate();
-  const date = value instanceof Date ? value : new Date(typeof value === "number" ? value : value.seconds ? value.seconds * 1000 : value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const dateLabel = (value) => dateValue(value)?.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) || "";
-const monthLabel = (value) => dateValue(value)?.toLocaleDateString(undefined, { month: "long", year: "numeric" }) || "Unknown date";
+const dateLabel = (value) => formatLongDate(value, { month: "short", day: "numeric", year: "numeric" });
+const monthLabel = (value) => formatLongDate(value, { month: "long", year: "numeric" }, "Unknown date");
 const durationLabel = (duration) => {
   if (!Number.isFinite(duration) || duration <= 0) return "";
   const totalSeconds = Math.floor(duration);
   return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
 };
-const bytesLabel = (size) => {
-  if (!Number.isFinite(size) || size <= 0) return "";
-  const units = ["B", "KB", "MB", "GB"];
-  let amount = size;
-  let unit = 0;
-  while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit += 1; }
-  return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
-};
-
-const safeUrl = (value) => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
-  } catch { return null; }
-};
+const bytesLabel = (size) => formatFileSize(size, "");
 
 const useLoadedMessages = (chatId) => useSyncExternalStore(
   (listener) => subscribeChatMessages(chatId, listener),
@@ -54,15 +41,8 @@ const useLoadedMessages = (chatId) => useSyncExternalStore(
 );
 
 const ContactAvatar = memo(function ContactAvatar({ user, onOpen, online }) {
-  const [loading, setLoading] = useState(Boolean(user.photoURL));
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    setLoading(Boolean(user.photoURL));
-    setFailed(false);
-  }, [user.photoURL]);
   return <button type="button" onClick={onOpen} className="relative mx-auto mb-3 block h-[104px] w-[104px] rounded-full border-2 border-[var(--border-strong)] bg-[var(--surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label="Open profile photo">
-    {loading && <span className="absolute inset-0 animate-pulse rounded-full bg-[var(--surface-4)]" />}
-    {!failed && user.photoURL ? <img src={optimizeUrl(user.photoURL, 800)} alt={user.displayName || "Profile photo"} className="relative h-full w-full rounded-full object-cover" loading="lazy" onLoad={() => setLoading(false)} onError={() => { setLoading(false); setFailed(true); }} /> : <Avatar name={user.displayName} size={104} className="relative h-full w-full rounded-full" />}
+    <Avatar src={user.photoURL} name={user.displayName} size={104} className="relative h-full w-full rounded-full" />
     {online && <span className="avatar-dot-online absolute bottom-1 right-1" aria-label="Online" />}
   </button>;
 });
@@ -71,22 +51,31 @@ const SkeletonRows = () => <div className="space-y-3" aria-label="Loading contac
   {[0, 1, 2].map((item) => <div key={item} className="h-12 animate-pulse rounded-lg bg-[var(--surface-3)]" />)}
 </div>;
 
-const MediaTile = memo(function MediaTile({ item, onOpen, moreCount = 0 }) {
+const MediaTile = memo(function MediaTile({ item, onOpen, index, moreCount = 0 }) {
   const isVideo = item.kind === "video";
-  const src = item.message.img || item.message.file?.url;
-  const optimized = optimizeUrl(src, 300);
-  const thumb = isVideo && optimized ? optimized.replace("/upload/f_auto,q_auto,w_300/", "/upload/so_0,f_jpg,q_auto,w_300/") : optimized;
-  const [failed, setFailed] = useState(false);
-  return <button type="button" onClick={onOpen} className="group relative aspect-square min-w-0 overflow-hidden rounded-xl bg-[var(--surface-3)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label={`Open ${isVideo ? "video" : item.kind === "gif" ? "GIF" : "image"}`}>
-    {!failed && thumb ? <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]" onError={() => setFailed(true)} /> : <span className="flex h-full items-center justify-center px-2 text-center text-xs text-[var(--text-muted)]">Image unavailable</span>}
+  const src = safeHttpUrl(item.message.img || item.message.file?.url);
+  const thumb = isVideo ? posterUrl(src, 300) : cloudinaryUrl(src, { w: 300, h: 300, crop: "fill", q: "auto", fmt: "auto" });
+  return <button type="button" onClick={() => onOpen(index)} onPointerEnter={preloadMediaViewer} onFocus={preloadMediaViewer} onTouchStart={preloadMediaViewer} className="group relative aspect-square min-w-0 overflow-hidden rounded-xl bg-[var(--surface-3)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label={`Open ${isVideo ? "video" : item.kind === "gif" ? "GIF" : "image"}`}>
+    {thumb ? <LazyImage src={thumb} alt="" width={300} height={300} sizes="120px" className="h-full w-full transition-transform duration-200 group-hover:scale-[1.03]" manualLoadAction="container" /> : <span className="flex h-full items-center justify-center px-2 text-center text-xs text-[var(--text-muted)]">Image unavailable</span>}
     {isVideo && <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white"><Play size={23} fill="currentColor" /><span className="sr-only">Video</span>{durationLabel(item.message.file?.duration) && <span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] tabular-nums">{durationLabel(item.message.file.duration)}</span>}</span>}
     {moreCount > 0 && <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-lg font-bold text-white">+{moreCount}</span>}
   </button>;
 });
 
-const SharedContent = memo(function SharedContent({ tab, items, onMediaOpen, onShowInChat }) {
+const SharedContent = memo(function SharedContent({ tab, items, onMediaOpen, onShowInChat, currentUserUid }) {
   const [pageCount, setPageCount] = useState(1);
   const sentinelRef = useRef(null);
+  const visibleItems = useMemo(() => items.slice(0, pageCount * TAB_PAGE_SIZE), [items, pageCount]);
+  const groups = useMemo(() => {
+    if (tab !== "media" && tab !== "gifs") return [];
+    return visibleItems.reduce((result, item) => {
+      const month = monthLabel(item.message.date);
+      const lastGroup = result[result.length - 1];
+      if (!lastGroup || lastGroup.month !== month) result.push({ month, items: [item] });
+      else lastGroup.items.push(item);
+      return result;
+    }, []);
+  }, [tab, visibleItems]);
   useEffect(() => setPageCount(1), [tab, items]);
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -100,28 +89,22 @@ const SharedContent = memo(function SharedContent({ tab, items, onMediaOpen, onS
 
   if (tab === "media" || tab === "gifs") {
     if (!items.length) return <EmptyShared />;
-    const visibleItems = items.slice(0, pageCount * TAB_PAGE_SIZE);
-    const groups = [];
-    visibleItems.forEach((item) => {
-      const month = monthLabel(item.message.date);
-      const lastGroup = groups[groups.length - 1];
-      if (!lastGroup || lastGroup.month !== month) groups.push({ month, items: [item] });
-      else lastGroup.items.push(item);
-    });
     return <div className="space-y-3">
       {groups.map((group) => <section key={group.month}>
         <h3 className="sticky top-[42px] z-[1] -mx-4 bg-[var(--surface)] px-4 py-2 text-xs font-semibold text-[var(--text-secondary)]">{group.month}</h3>
-        <div className="grid grid-cols-3 gap-0.5">{group.items.map((item, index) => <MediaTile key={item.message.id || `${item.kind}-${index}`} item={item} onOpen={() => onMediaOpen(item.viewerIndex)} />)}</div>
+        <div className="grid grid-cols-3 gap-0.5">{group.items.map((item, index) => <MediaTile key={item.message.id || `${item.kind}-${index}`} item={item} index={item.viewerIndex} onOpen={onMediaOpen} />)}</div>
       </section>)}
       <div ref={sentinelRef} className="h-2" aria-hidden="true" />
+      {typeof IntersectionObserver === "undefined" && visibleItems.length < items.length && <button type="button" onClick={() => setPageCount((count) => Math.min(count + 1, Math.ceil(items.length / TAB_PAGE_SIZE)))} className="min-h-11 w-full rounded-lg text-sm font-semibold text-[var(--primary-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">Load more</button>}
     </div>;
   }
 
   if (!items.length) return <EmptyShared />;
   if (tab === "files") return <div className="divide-y divide-[var(--border)]">{items.map((item, index) => {
     const file = item.message.file || {};
+    const fileUrl = safeHttpUrl(file.url);
     const Icon = file.mime?.startsWith("image/") ? FileImage : file.mime?.startsWith("video/") ? FileVideo : file.mime?.startsWith("audio/") ? FileAudio : File;
-    return <a key={item.message.id || index} href={file.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-3 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+    return <a key={item.message.id || index} href={fileUrl || undefined} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-center gap-3 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
       <Icon size={19} className="shrink-0 text-[var(--primary-light)]" />
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-[var(--text-primary)]">{file.name || "Attachment"}</span><span className="text-xs text-[var(--text-muted)]">{bytesLabel(file.size)}{file.size ? " · " : ""}{dateLabel(item.message.date)}</span></span>
       <Download size={16} className="shrink-0 text-[var(--text-muted)]" />
@@ -132,17 +115,19 @@ const SharedContent = memo(function SharedContent({ tab, items, onMediaOpen, onS
     <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-[var(--text-primary)]">{new URL(item.url).hostname}</span><span className="block truncate text-xs text-[var(--text-secondary)]">{item.url}</span><span className="mt-1 block text-[11px] text-[var(--text-muted)]">{dateLabel(item.message.date)}</span></span>
   </a>)}</div>;
   return <div className="divide-y divide-[var(--border)]">{items.map((item, index) => {
-    const audio = item.message.file?.url;
-    return <AudioMessageRow key={item.message.id || index} item={item} audio={audio} onShowInChat={onShowInChat} />;
+    return <AudioMessageRow key={item.message.id || index} item={item} isOwn={item.message.senderId === currentUserUid} onShowInChat={onShowInChat} />;
   })}</div>;
 });
 
-const AudioMessageRow = memo(function AudioMessageRow({ item, audio, onShowInChat }) {
-  const [duration, setDuration] = useState(item.message.file?.duration || 0);
+const AudioMessageRow = memo(function AudioMessageRow({ item, isOwn, onShowInChat }) {
   return <div className="flex min-w-0 items-center gap-3 py-3">
     <FileAudio size={19} className="shrink-0 text-[var(--primary-light)]" />
-    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[var(--text-primary)]">{item.message.file?.name || "Audio message"}</p><p className="text-xs text-[var(--text-muted)]">{durationLabel(duration)}{durationLabel(duration) ? " · " : ""}{dateLabel(item.message.date)}</p><audio src={audio} controls preload="metadata" className="contact-panel-audio mt-2 h-9 w-full" onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onPlay={(event) => { document.querySelectorAll(".contact-panel-audio").forEach((element) => { if (element !== event.currentTarget) element.pause(); }); }} /></div>
-    <button type="button" onClick={() => onShowInChat?.(item.message.id)} className="icon-btn shrink-0" aria-label="Show audio in chat"><MessageCircle size={16} /></button>
+    <div className="min-w-0 flex-1">
+      <p className="truncate text-sm font-medium text-[var(--text-primary)]">Voice message</p>
+      <p className="mb-1 text-xs text-[var(--text-muted)]">{dateLabel(item.message.date)}</p>
+      <VoiceMessage message={item.message} isOwn={isOwn} isBubble={false} nextMessage={item.nextMessage} />
+    </div>
+    <button type="button" onClick={() => onShowInChat?.(item.message.id)} className="icon-btn min-h-11 min-w-11 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" aria-label="Show voice message in chat"><MessageCircle size={16} /></button>
   </div>;
 });
 
@@ -158,24 +143,27 @@ const StatCard = memo(function StatCard({ label, value }) {
 const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }) {
   const context = useContext(ChatContext);
   const panelContext = useContext(ContactPanelContext);
-  const userChats = useContext(UserChatsContext);
+  const panelActions = useContext(ContactPanelActionsContext);
+  const userChats = useContext(UserChatsMetadataContext);
   const userDocument = useContext(UserDocumentContext);
   const { currentUser } = useContext(AuthContext);
   const navigate = useNavigate();
   const { data, dispatch } = context;
-  const { contactPanel, closeContactPanel, openContactPanelUser, backContactPanel } = panelContext;
+  const { contactPanel } = panelContext;
+  const { closeContactPanel, openContactPanelUser, backContactPanel } = panelActions;
   const target = contactPanel.user;
   const messages = useLoadedMessages(data.chatId);
   const reduceMotion = useReducedMotion();
-  const [details, setDetails] = useState(() => target?.uid ? userCache.get(target.uid)?.data || null : null);
+  const [details, setDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [activeTab, setActiveTab] = useState("media");
   const [showMediaScreen, setShowMediaScreen] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showMuteOptions, setShowMuteOptions] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copyText: copyValue } = useCopyToClipboard();
   const [viewer, setViewer] = useState(null);
   const panelRef = useRef(null);
+  const scrollRootRef = useRef(null);
   const closeRef = useRef(null);
   const heroRef = useRef(null);
   const stickyRef = useRef(null);
@@ -204,23 +192,13 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
   useEffect(() => {
     if (!contactPanel.open || !target?.uid || target.isGroup) return undefined;
     let cancelled = false;
-    const cached = userCache.get(target.uid);
-    setDetails(cached?.data || null);
-    if (cached?.data) {
-      setDetails(cached.data);
-      setLoadingDetails(false);
-      return undefined;
-    }
+    setDetails(null);
     setLoadingDetails(true);
-    const pending = cached?.promise || getDoc(doc(db, "users", target.uid)).then((snapshot) => snapshot.exists() ? snapshot.data() : {}).then((userData) => {
-      userCache.set(target.uid, { data: userData });
-      return userData;
-    }).catch((error) => {
-      userCache.delete(target.uid);
-      throw error;
+    getUserDocument(target.uid).then((userData) => {
+      if (!cancelled) setDetails(userData);
+    }).catch((error) => console.error("Error fetching contact details:", error)).finally(() => {
+      if (!cancelled) setLoadingDetails(false);
     });
-    if (!cached) userCache.set(target.uid, { promise: pending });
-    pending.then((userData) => { if (!cancelled) setDetails(userData); }).catch((error) => console.error("Error fetching contact details:", error)).finally(() => { if (!cancelled) setLoadingDetails(false); });
     return () => { cancelled = true; };
   }, [contactPanel.open, target?.uid, target?.isGroup]);
 
@@ -295,26 +273,44 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
     const links = [];
     const voice = [];
     const ordered = [...messages].filter((message) => message && message.status !== "sending").reverse();
-    ordered.forEach((message) => {
+    ordered.forEach((message, orderedIndex) => {
       const file = message.file || {};
+      const isAudio = message.type === "audio" || Boolean(message.audio?.url) || file.mime?.startsWith("audio/");
       if (message.img) {
         const item = { message, kind: message.type === "image" ? "image" : "gif" };
         if (item.kind === "image") media.push(item);
         else gifs.push(item);
       }
       if (file.url && file.mime?.startsWith("video/")) media.push({ message, kind: "video" });
-      else if (file.url && file.mime?.startsWith("audio/")) voice.push({ message });
+      else if (isAudio && (message.audio?.url || file.url) && !message.deleted && !message.deletedAt && message.type !== "deleted") {
+        const nextMessage = ordered[orderedIndex - 1];
+        voice.push({
+          message,
+          nextMessage: nextMessage &&
+            (nextMessage.type === "audio" || nextMessage.audio?.url || nextMessage.file?.mime?.startsWith("audio/")) &&
+            nextMessage.senderId === message.senderId &&
+            !nextMessage.deleted &&
+            !nextMessage.deletedAt &&
+            nextMessage.type !== "deleted"
+            ? nextMessage
+            : null,
+        });
+      }
       else if (file.url) files.push({ message });
       if (typeof message.text === "string") {
         const matches = message.text.match(/https?:\/\/[^\s<>{}"']+/gi) || [];
         matches.forEach((candidate) => {
-          const url = safeUrl(candidate.replace(/[),.!?;:]+$/, ""));
+          const url = safeHttpUrl(candidate.replace(/[),.!?;:]+$/, ""));
           if (url) links.push({ message, url });
         });
       }
     });
     media.forEach((item, index) => { item.viewerIndex = index; });
-    const mediaViewerItems = media.map((item) => ({ ...item, src: item.message.img || item.message.file?.url, original: item.message.img || item.message.file?.url }));
+    const mediaViewerItems = media.map((item) => ({
+      ...item,
+      src: safeHttpUrl(item.message.img || item.message.file?.url),
+      original: safeHttpUrl(item.message.img || item.message.file?.url),
+    }));
     gifs.forEach((item, index) => { item.viewerIndex = index; });
     return { media, gifs, files, links, voice, mediaViewerItems };
   }, [messages]);
@@ -342,19 +338,19 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
     if (!tabs.some((tab) => tab.id === activeTab)) setActiveTab("media");
   }, [tabs, activeTab]);
 
-  const openViewer = (items, index) => {
+  const openViewer = useCallback((items, index) => {
     viewerTriggerRef.current = document.activeElement;
     setViewer({ items, index, startX: null });
-  };
+  }, []);
+  const openContactMedia = useCallback((index) => openViewer(content.mediaViewerItems, index), [content.mediaViewerItems, openViewer]);
+  const openSharedMedia = useCallback((index) => {
+    const items = activeTab === "gifs"
+      ? content.gifs.map((item) => ({ ...item, src: item.message.img, original: item.message.img }))
+      : content.mediaViewerItems;
+    openViewer(items, index);
+  }, [activeTab, content.gifs, content.mediaViewerItems, openViewer]);
   const openAvatar = () => openViewer([{ src: target?.photoURL, original: target?.photoURL, message: { senderName: target?.displayName, date: null }, kind: "image" }], 0);
   const closePanel = () => { setViewer(null); closeContactPanel(); };
-  const copyValue = async (value) => {
-    try {
-      await navigator.clipboard.writeText(String(value));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch { /* Clipboard can be unavailable in insecure browser contexts. */ }
-  };
   const showMessage = (messageId) => {
     setViewer(null);
     closeContactPanel();
@@ -375,17 +371,17 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
   const isArchived = Boolean(preferences.archived);
   const isCurrentConversation = target.uid === data.user?.uid;
   const online = target.online === true || target.presence === "online" || details?.online === true || details?.presence === "online";
-  const lastSeen = dateValue(target.lastSeen || details?.lastSeen);
+  const lastSeen = toDate(target.lastSeen || details?.lastSeen);
   const subtitle = target.isGroup
     ? (target.members || []).map((member) => member.displayName).filter(Boolean).join(", ") || `${target.members?.length || 0} members`
-    : target.email || details?.email || (online ? "Online" : lastSeen ? `Last seen ${lastSeen.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : target.status || details?.bio || "");
+    : target.email || details?.email || (online ? "Online" : lastSeen ? `Last seen ${formatTime(lastSeen)}` : target.status || details?.bio || "");
   const infoItems = [
     details?.bio && { icon: Info, label: "About", value: details.bio },
     (target.email || details?.email) && { icon: Mail, label: "Email", value: target.email || details.email },
-    details?.createdAt && dateValue(details.createdAt) && {
+    details?.createdAt && toDate(details.createdAt) && {
       icon: CalendarDays,
       label: "Joined",
-      value: dateValue(details.createdAt).toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+      value: formatLongDate(details.createdAt, { month: "long", year: "numeric" }),
     },
   ].filter(Boolean);
   const stats = [
@@ -398,23 +394,21 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
   const saveChatPreference = async (key, value) => {
     if (!currentUser?.uid || !data.chatId) return;
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", data.chatId, key), value);
+      await writeChatPreference(currentUser.uid, data.chatId, key, value);
     } catch (error) {
       console.error("Error saving chat preference:", error);
     }
   };
   const updateMute = async (duration) => {
     if (!currentUser?.uid || !data.chatId) return;
-    const value = duration === "off" ? deleteField() : duration === "always" ? 9999999999999 : Date.now() + duration;
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", data.chatId, "mutedUntil"), value);
+      await saveMutePreference(currentUser.uid, data.chatId, duration);
       setShowMuteOptions(false);
       setShowMoreMenu(false);
     } catch (error) {
       console.error("Error saving mute preference:", error);
     }
   };
-  const openContactMedia = (index) => openViewer(content.mediaViewerItems, index);
   const showSharedContent = () => {
     setActiveTab(content.media.length ? "media" : tabs.find((tab) => tab.count > 0)?.id || "media");
     setShowMediaScreen(true);
@@ -423,6 +417,7 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
 
   return <>
     <motion.aside ref={panelRef} role="dialog" aria-modal={isMobilePanel} aria-label={`${target.displayName || "Contact"} information`} initial={reduceMotion ? false : { x: "100%" }} animate={{ x: 0 }} exit={reduceMotion ? undefined : { x: "100%" }} transition={{ duration: reduceMotion ? 0 : 0.24, ease: "easeOut" }} className="ember-bg fixed inset-0 z-[45] flex min-h-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--bg)] lg:static lg:h-full lg:w-[380px] lg:shrink-0">
+      <ScrollRootProvider rootRef={scrollRootRef}>
       <header ref={stickyRef} className="relative z-20 flex min-h-14 shrink-0 items-center gap-2 px-3 pt-[env(safe-area-inset-top)]">
         <button ref={closeRef} type="button" className="icon-btn-glass" onClick={() => {
           if (showMediaScreen) setShowMediaScreen(false);
@@ -451,7 +446,7 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
         </div>}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
+      <div ref={scrollRootRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         {!showMediaScreen ? <>
           <section ref={heroRef} className="px-5 pb-5 pt-5 text-center">
             <ContactAvatar user={target} onOpen={openAvatar} online={online} />
@@ -471,7 +466,7 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
               <span className="text-sm font-semibold text-[var(--text-1)]">Media and photos</span><ChevronRight size={18} className="text-[var(--text-2)]" />
             </button>
             <div className="grid grid-cols-4 gap-1.5">
-              {content.media.slice(0, 4).map((item, index) => <MediaTile key={item.message.id || `${item.kind}-${index}`} item={item} onOpen={() => openContactMedia(index)} moreCount={index === 3 ? content.media.length - 4 : 0} />)}
+              {content.media.slice(0, 4).map((item, index) => <MediaTile key={item.message.id || `${item.kind}-${index}`} item={item} index={item.viewerIndex} onOpen={openContactMedia} moreCount={index === 3 ? content.media.length - 4 : 0} />)}
             </div>
           </section> : tabs.some((tab) => tab.count > 0) && <button type="button" onClick={showSharedContent} className="glass mx-4 mb-4 flex w-[calc(100%-2rem)] items-center justify-between rounded-[20px] p-4 text-left">
             <span><span className="block text-sm font-semibold text-[var(--text-1)]">Shared content</span><span className="mt-1 block text-xs text-[var(--text-2)]">Browse files, links, voice, GIFs, and groups</span></span><ChevronRight size={18} className="shrink-0 text-[var(--text-2)]" />
@@ -503,17 +498,44 @@ const ContactPanel = memo(function ContactPanel({ onFocusMessage, onShowInChat }
           <div id="contact-tabpanel" role="tabpanel" aria-labelledby={`contact-tab-${activeTab}`} className="p-4">
             {activeTab === "members" ? <div className="glass divide-y divide-[var(--border)] rounded-[20px] px-3">{(target.members || []).map((member) => <button key={member.uid} type="button" onClick={() => openContactPanelUser(member)} className="flex w-full min-w-0 items-center gap-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"><Avatar src={member.photoURL} name={member.displayName} size={40} className="h-10 w-10 rounded-full" /><span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-1)]">{member.displayName || "Member"}</span>{target.admin === member.uid && <span className="text-[10px] font-semibold text-[var(--primary)]">Admin</span>}</button>)}</div>
               : activeTab === "groups" ? <div className="glass divide-y divide-[var(--border)] rounded-[20px] px-3">{commonGroups.map(({ chatId, group }) => <button key={chatId} type="button" onClick={() => { closePanel(); dispatch({ type: "SET_CHAT", payload: { user: group, chatId } }); navigate(`/chat/${chatId}`); }} className="flex w-full items-center gap-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"><Avatar src={group.photoURL} name={group.displayName} size={40} className="h-10 w-10 rounded-xl" /><span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-1)]">{group.displayName || "Group"}</span><Users size={16} className="text-[var(--text-2)]" /></button>)}</div>
-                : <SharedContent tab={activeTab} items={content[activeTab] || []} onMediaOpen={(index) => openViewer(activeTab === "gifs" ? content.gifs.map((item) => ({ ...item, src: item.message.img, original: item.message.img })) : content.mediaViewerItems, index)} onShowInChat={showMessage} />}
+                : <SharedContent tab={activeTab} items={content[activeTab] || []} currentUserUid={currentUser?.uid} onMediaOpen={openSharedMedia} onShowInChat={showMessage} />}
           </div>
         </>}
       </div>
-      {copied && <div role="status" className="fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-[var(--surface-3)] px-3 py-2 text-xs font-medium text-[var(--text-1)] shadow-lg"><Check size={13} className="mr-1 inline" />Copied</div>}
+      {copied && <Toast className="bottom-6">Copied</Toast>}
+      </ScrollRootProvider>
     </motion.aside>
 
     <AnimatePresence>
-      {viewer && viewerItem && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[90] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label="Shared media viewer" onPointerDown={(event) => setViewer((current) => ({ ...current, startX: event.clientX }))} onPointerUp={(event) => { if (viewer.startX === null) return; const distance = event.clientX - viewer.startX; if (Math.abs(distance) > 50) setViewer((current) => ({ ...current, index: (current.index + (distance < 0 ? 1 : -1) + current.items.length) % current.items.length, startX: null })); else setViewer((current) => ({ ...current, startX: null })); }}>
-        <div className="flex h-14 shrink-0 items-center gap-3 px-4"><button ref={viewerCloseRef} type="button" className="icon-btn text-white focus-visible:ring-2 focus-visible:ring-white" aria-label="Close viewer" onClick={() => setViewer(null)}><X size={20} /></button><span className="min-w-0 flex-1 truncate text-sm">{viewerItem.message.senderName || target.displayName} · {dateLabel(viewerItem.message.date)}</span><span className="text-xs tabular-nums">{viewer.index + 1} / {viewer.items.length}</span><a href={viewerItem.original} target="_blank" rel="noopener noreferrer" className="icon-btn text-white" aria-label="Open original media"><Download size={18} /></a><button type="button" onClick={() => showMessage(viewerItem.message.id)} className="rounded-full border border-white/30 px-3 py-2 text-xs font-semibold">Show in chat</button></div>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center p-4"><button type="button" onClick={() => setViewer((current) => ({ ...current, index: (current.index - 1 + current.items.length) % current.items.length }))} className="absolute left-2 z-10 icon-btn text-white" aria-label="Previous media"><ChevronLeft size={26} /></button>{viewerItem.kind === "video" ? <video src={viewerItem.src} controls autoPlay className="max-h-full max-w-full" /> : <img src={viewerItem.src} alt="Shared media" className="max-h-full max-w-full object-contain" />}{viewerItem.kind !== "video" && viewer.items.length > 1 && <img src={viewer.items[(viewer.index + 1) % viewer.items.length].src} alt="" className="hidden" />}{viewer.items.length > 1 && <button type="button" onClick={() => setViewer((current) => ({ ...current, index: (current.index + 1) % current.items.length }))} className="absolute right-2 z-10 icon-btn text-white" aria-label="Next media"><ChevronRight size={26} /></button>}</div>
+      {viewer && viewerItem && <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[90] flex flex-col bg-black/95 text-white"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Shared media viewer"
+        onPointerDown={(event) => setViewer((current) => ({ ...current, startX: event.clientX }))}
+        onPointerUp={(event) => setViewer((current) => {
+          if (current.startX === null) return current;
+          const distance = event.clientX - current.startX;
+          if (Math.abs(distance) > 50) {
+            return { ...current, index: (current.index + (distance < 0 ? 1 : -1) + current.items.length) % current.items.length, startX: null };
+          }
+          return { ...current, startX: null };
+        })}
+      >
+        <Suspense fallback={<div className="flex-1 animate-pulse" aria-label="Loading media viewer" />}>
+          <ContactMediaViewer
+            viewer={viewer}
+            viewerItem={viewerItem}
+            targetName={target.displayName}
+            closeButtonRef={viewerCloseRef}
+            onClose={() => setViewer(null)}
+            onChange={setViewer}
+            onShowMessage={showMessage}
+          />
+        </Suspense>
       </motion.div>}
     </AnimatePresence>
   </>;
