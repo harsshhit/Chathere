@@ -8,9 +8,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { AuthContext } from "./AuthContext";
+import { UserDocumentContext, UserDocumentLoadedContext } from "./ChatContexts";
 import {
   DEFAULT_THEME,
   META_THEME_COLORS,
@@ -56,6 +57,8 @@ const applyThemeToDocument = (value) => {
 export const ThemeProvider = ({ children }) => {
   const { currentUser } = useContext(AuthContext);
   const uid = currentUser?.uid;
+  const userDocument = useContext(UserDocumentContext);
+  const userDocumentLoaded = useContext(UserDocumentLoadedContext);
 
   const initialStored = useRef(readStoredTheme());
   // True once the user has an explicit preference on this device. Until then
@@ -96,35 +99,24 @@ export const ThemeProvider = ({ children }) => {
   // After login: adopt the Firestore preference if this device has none, or
   // seed Firestore with the local preference if the account has none yet.
   useEffect(() => {
-    if (!uid) return;
-    let cancelled = false;
+    if (!uid || userDocumentLoaded !== uid) return;
+    const remote = userDocument.theme;
 
-    getDoc(doc(db, "users", uid))
-      .then((snap) => {
-        if (cancelled || !snap.exists()) return;
-        const remote = snap.data()?.theme;
+    if (hasLocalPrefRef.current) {
+      if (!isValidTheme(remote)) {
+        updateDoc(doc(db, "users", uid), { theme: themeRef.current }).catch((err) =>
+          console.error("Error saving theme preference:", err)
+        );
+      }
+      return;
+    }
 
-        if (hasLocalPrefRef.current) {
-          if (!isValidTheme(remote)) {
-            updateDoc(doc(db, "users", uid), { theme: themeRef.current }).catch(
-              () => {}
-            );
-          }
-          return;
-        }
-
-        if (isValidTheme(remote)) {
-          hasLocalPrefRef.current = true;
-          setThemeState(remote);
-          writeStoredTheme(remote);
-        }
-      })
-      .catch((err) => console.error("Error loading theme preference:", err));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [uid]);
+    if (isValidTheme(remote)) {
+      hasLocalPrefRef.current = true;
+      setThemeState(remote);
+      writeStoredTheme(remote);
+    }
+  }, [uid, userDocumentLoaded, userDocument.theme]);
 
   // Keep multiple open tabs in sync.
   useEffect(() => {

@@ -1,14 +1,33 @@
-import { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from "react";
+import { useContext, useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useLocation, matchPath } from "react-router-dom";
 import { AuthContext } from "./AuthContext";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { cacheUserDocument, getUserDocument } from "../utils/userDocumentCache";
 
-export const ChatContext = createContext();
-export const ContactPanelContext = createContext({});
-export const ContactPanelActionsContext = createContext({});
-export const UserChatsContext = createContext({});
-export const UserDocumentContext = createContext({});
+import {
+  ChatContext,
+  ContactPanelContext,
+  ContactPanelActionsContext,
+  UserChatsContext,
+  UserChatsMetadataContext,
+  UserUnreadContext,
+  UserDocumentContext,
+  UserDocumentLoadedContext,
+  UserChatsLoadedContext,
+} from "./ChatContexts";
+
+export {
+  ChatContext,
+  ContactPanelContext,
+  ContactPanelActionsContext,
+  UserChatsContext,
+  UserChatsMetadataContext,
+  UserUnreadContext,
+  UserDocumentContext,
+  UserDocumentLoadedContext,
+  UserChatsLoadedContext,
+};
 
 export const ChatContextProvider = ({ children }) => {
   const { currentUser } = useContext(AuthContext);
@@ -23,20 +42,50 @@ export const ChatContextProvider = ({ children }) => {
   const [chatNotFound, setChatNotFound] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
   const [contactPanel, setContactPanel] = useState({ open: false, userId: null, user: null, history: [] });
 
   useEffect(() => {
     setReplyingTo(null);
     setEditingMessage(null);
+    setForwardingMessage(null);
     setContactPanel({ open: false, userId: null, user: null, history: [] });
   }, [urlChatId]);
 
   const userChatsRef = useRef({});
   const [userChatsSnapshot, setUserChatsSnapshot] = useState({});
   const [userChatsLoaded, setUserChatsLoaded] = useState(false);
+  const [userChatsLoadedUid, setUserChatsLoadedUid] = useState(null);
   const [userDocument, setUserDocument] = useState({});
+  const [userDocumentLoaded, setUserDocumentLoaded] = useState(null);
+  const userChatsMetadataRef = useRef({ signature: null, value: {} });
+  const userUnreadRef = useRef({ signature: null, value: {} });
+
+  const userChatsMetadata = useMemo(() => {
+    const metadata = Object.fromEntries(
+      Object.entries(userChatsSnapshot).map(([chatId, chat]) => {
+        const { unread, ...chatMetadata } = chat || {};
+        return [chatId, chatMetadata];
+      })
+    );
+    const signature = JSON.stringify(metadata);
+    if (signature === userChatsMetadataRef.current.signature) return userChatsMetadataRef.current.value;
+    userChatsMetadataRef.current = { signature, value: metadata };
+    return metadata;
+  }, [userChatsSnapshot]);
+
+  const userUnread = useMemo(() => {
+    const unreadByChat = Object.fromEntries(
+      Object.entries(userChatsSnapshot).map(([chatId, chat]) => [chatId, Number(chat?.unread) || 0])
+    );
+    const signature = JSON.stringify(unreadByChat);
+    if (signature === userUnreadRef.current.signature) return userUnreadRef.current.value;
+    userUnreadRef.current = { signature, value: unreadByChat };
+    return unreadByChat;
+  }, [userChatsSnapshot]);
 
   useEffect(() => {
+    setUserDocumentLoaded(null);
     if (!currentUser?.uid) {
       setUserDocument({});
       return undefined;
@@ -44,8 +93,15 @@ export const ChatContextProvider = ({ children }) => {
 
     const unsub = onSnapshot(
       doc(db, "users", currentUser.uid),
-      (docSnap) => setUserDocument(docSnap.exists() ? docSnap.data() || {} : {}),
-      (err) => console.error("current user document snapshot error:", err)
+      (docSnap) => {
+        const userData = docSnap.exists() ? docSnap.data() || {} : {};
+        cacheUserDocument(currentUser.uid, userData);
+        setUserDocument(userData);
+        setUserDocumentLoaded(currentUser.uid);
+      },
+      (err) => {
+        console.error("current user document snapshot error:", err);
+      }
     );
 
     return () => unsub();
@@ -53,10 +109,11 @@ export const ChatContextProvider = ({ children }) => {
 
   // Subscribe to the current user's userChats collection
   useEffect(() => {
+    setUserChatsLoaded(false);
+    setUserChatsLoadedUid(null);
+    userChatsRef.current = {};
+    setUserChatsSnapshot({});
     if (!currentUser?.uid) {
-      userChatsRef.current = {};
-      setUserChatsSnapshot({});
-      setUserChatsLoaded(true);
       return;
     }
 
@@ -70,6 +127,7 @@ export const ChatContextProvider = ({ children }) => {
         }
         setUserChatsSnapshot(userChatsRef.current);
         setUserChatsLoaded(true);
+        setUserChatsLoadedUid(currentUser.uid);
       },
       (err) => {
         console.error("userChats snapshot error:", err);
@@ -157,10 +215,10 @@ export const ChatContextProvider = ({ children }) => {
         if (currentUser?.uid && urlChatId.includes(currentUser.uid)) {
           const otherUid = urlChatId.replace(currentUser.uid, "");
           if (otherUid) {
-            const userDoc = await getDoc(doc(db, "users", otherUid));
+            const userData = await getUserDocument(otherUid);
             if (!isCancelled) {
-              if (userDoc.exists()) {
-                setActiveUser(userDoc.data());
+              if (userData.uid || userData.displayName || userData.photoURL) {
+                setActiveUser(userData);
                 setChatNotFound(false);
               } else {
                 const chatDoc = await getDoc(doc(db, "chats", urlChatId));
@@ -265,9 +323,11 @@ export const ChatContextProvider = ({ children }) => {
       setReplyingTo,
       editingMessage,
       setEditingMessage,
+      forwardingMessage,
+      setForwardingMessage,
       dispatch,
     }),
-    [urlChatId, activeUser, loadingChat, chatNotFound, replyingTo, editingMessage, dispatch]
+    [urlChatId, activeUser, loadingChat, chatNotFound, replyingTo, editingMessage, forwardingMessage, dispatch]
   );
 
   const panelValue = useMemo(() => ({ contactPanel }), [contactPanel]);
@@ -281,13 +341,21 @@ export const ChatContextProvider = ({ children }) => {
   return (
     <ChatContext.Provider value={value}>
       <UserChatsContext.Provider value={userChatsSnapshot}>
-        <UserDocumentContext.Provider value={userDocument}>
-          <ContactPanelContext.Provider value={panelValue}>
-            <ContactPanelActionsContext.Provider value={panelActions}>
-              {children}
-            </ContactPanelActionsContext.Provider>
-          </ContactPanelContext.Provider>
-        </UserDocumentContext.Provider>
+        <UserChatsLoadedContext.Provider value={userChatsLoadedUid}>
+          <UserChatsMetadataContext.Provider value={userChatsMetadata}>
+            <UserUnreadContext.Provider value={userUnread}>
+              <UserDocumentContext.Provider value={userDocument}>
+                <UserDocumentLoadedContext.Provider value={userDocumentLoaded}>
+                  <ContactPanelContext.Provider value={panelValue}>
+                    <ContactPanelActionsContext.Provider value={panelActions}>
+                      {children}
+                    </ContactPanelActionsContext.Provider>
+                  </ContactPanelContext.Provider>
+                </UserDocumentLoadedContext.Provider>
+              </UserDocumentContext.Provider>
+            </UserUnreadContext.Provider>
+          </UserChatsMetadataContext.Provider>
+        </UserChatsLoadedContext.Provider>
       </UserChatsContext.Provider>
     </ChatContext.Provider>
   );

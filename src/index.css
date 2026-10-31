@@ -1,8 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html[data-page-hidden] .shimmer,
+html[data-page-hidden] .animate-pulse {
+  animation-play-state: paused !important;
+}
 
 @layer base {
   * {
@@ -50,7 +53,7 @@
     --primary-text: #ffd3b8;
     --primary-light: var(--primary-text);
     --primary-dark: var(--primary-hover);
-    --on-primary: #ffffff;
+    --on-primary: #0e0a09;
     --ring: #f2732b;
     --accent: #d9b894;
     --accent-name: #d9b894;
@@ -109,8 +112,8 @@
     --text-primary: var(--text-1);
     --text-secondary: var(--text-2);
     --text-muted: var(--text-3);
-    --primary: #d9560f;
-    --primary-hover: #c8490b;
+    --primary: #c8490b;
+    --primary-hover: #b03e08;
     --primary-soft: rgba(217,86,15,.12);
     --primary-glow: rgba(217,86,15,.24);
     --primary-border: rgba(180,71,11,.42);
@@ -315,7 +318,11 @@
   .contact-setting-row:hover,
   .contact-setting-row:focus-visible {
     background: var(--hover);
-    outline: none;
+  }
+
+  .contact-setting-row:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .mobile-tab-shell {
@@ -640,6 +647,10 @@
   .menu-row:focus-visible {
     background: var(--hover);
     outline: none;
+  }
+
+  @media (hover: none) {
+    .chat-row-menu { display: none !important; }
   }
 
   :root {

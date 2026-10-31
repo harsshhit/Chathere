@@ -1,42 +1,44 @@
-import React, { useContext, useState, useRef, useEffect, useReducer, useCallback } from "react";
+import React, { lazy, Suspense, useContext, useState, useRef, useEffect, useReducer, useCallback } from "react";
 import {
   Send,
   Smile,
   X,
   Image as ImageIcon,
   Loader2,
-  Mic,
   Paperclip,
   FileText,
   Video,
   Music4,
-  Film,
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
   Plus,
+  Mic,
+  Pause,
+  Play,
+  Square,
+  Trash2,
+  Forward,
 } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext } from "../context/ChatContext";
+import { ChatContext, UserChatsContext } from "../context/ChatContexts";
 import {
-  arrayUnion,
   doc,
+  FieldPath,
   getDoc,
-  setDoc,
-  serverTimestamp,
   Timestamp,
   updateDoc,
-  increment,
   runTransaction,
 } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { v4 as uuid } from "uuid";
-import EmojiPicker from "emoji-picker-react";
-import { motion, AnimatePresence } from "framer-motion";
-import GifPicker from "./GifPicker";
+import LazyImage from "./ui/LazyImage";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { useTheme } from "../context/ThemeContext";
 import { pendingMessagesStore } from "../utils/pendingMessages";
 import { uploadFile } from "../utils/cloudinary";
+import { getVoiceFileExtension, formatVoiceDuration, isVoiceSupported, VoiceRecorder } from "../utils/voiceRecorder";
+import VoiceMessage, { activateVoiceMessage, deactivateVoiceMessage, pauseActiveVoiceMessage } from "./VoiceMessage";
 import {
   MAX_IMAGE_MB,
   MAX_VIDEO_MB,
@@ -46,19 +48,11 @@ import {
   BLOCKED_EXTENSIONS,
 } from "../config/uploadLimits";
 import { compressImage } from "../utils/compressImage";
+import { formatFileSize as formatBytes } from "../utils/formatters";
+import { writeChatMessages } from "../utils/chatMessageWrites";
 
-const formatBytes = (bytes = 0) => {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
-  const units = ["B", "KB", "MB", "GB"];
-  let size = bytes;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  const rounded = size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1);
-  return `${rounded} ${units[unitIndex]}`;
-};
+const EmojiPicker = lazy(() => import("emoji-picker-react"));
+const GifPicker = lazy(() => import("./GifPicker"));
 
 const getAttachmentKind = (file) => {
   if (!file || !file.type) return "file";
@@ -99,6 +93,9 @@ const getImageSizeLabel = (item) => {
     ? `${formatBytes(item.compressed.compressedSize)} (was ${formatBytes(item.file.size)}, -${savings}%)`
     : formatBytes(item.file.size);
 };
+
+const compactVoiceDuration = (duration) => formatVoiceDuration(duration).replace(/^0(?=\d:)/, "");
+const emptyVoiceWaveform = () => Array.from({ length: 40 }, () => 6);
 
 const getBlockedStatus = (file) => {
   const name = file?.name || "";
@@ -145,26 +142,150 @@ const Input = () => {
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [attachmentQueue, dispatchAttachments] = useReducer(attachmentReducer, []);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [voiceState, setVoiceState] = useState("idle");
+  const [voiceElapsed, setVoiceElapsed] = useState(0);
+  const [voiceWaveform, setVoiceWaveform] = useState(emptyVoiceWaveform);
+  const [voicePreview, setVoicePreview] = useState(null);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewTime, setPreviewTime] = useState(0);
+  const [voiceNotice, setVoiceNotice] = useState("");
+  const [voiceAnnouncement, setVoiceAnnouncement] = useState("");
+  const [forwardingBusy, setForwardingBusy] = useState(false);
+  const [forwardingChatId, setForwardingChatId] = useState("");
+  const [forwardError, setForwardError] = useState("");
 
   const { currentUser } = useContext(AuthContext);
-  const { data, replyingTo, setReplyingTo, editingMessage, setEditingMessage } = useContext(ChatContext);
+  const {
+    data,
+    replyingTo,
+    setReplyingTo,
+    editingMessage,
+    setEditingMessage,
+    forwardingMessage,
+    setForwardingMessage,
+  } = useContext(ChatContext);
+  const userChats = useContext(UserChatsContext);
   const { theme } = useTheme();
+  const shouldReduceMotion = useReducedMotion();
   const pickerRef = useRef(null);
   const quickActionsRef = useRef(null);
   const inputRef = useRef(null);
   const queueInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const lastTypingWriteAtRef = useRef(0);
+  const typingActiveRef = useRef(false);
+  const sendInFlightRef = useRef(false);
   const imageInputRef = useRef(null);
   const draftsRef = useRef({});
+  const voiceRecorderRef = useRef(null);
+  const voiceRecorderStartingRef = useRef(false);
+  const voiceStateRef = useRef("idle");
+  const voicePreviewRef = useRef(null);
+  const voiceRecorderNoticeRef = useRef("");
+  const previewAudioRef = useRef(null);
+  const previewSliderRef = useRef(null);
+  const previewNeedsDurationFixRef = useRef(false);
+  const forwardJobsRef = useRef(new Map());
+  const voiceOwnerRef = useRef({ chatId: data.chatId, uid: currentUser?.uid });
+  const setVoiceStage = useCallback((nextState) => {
+    voiceStateRef.current = nextState;
+    setVoiceState(nextState);
+  }, []);
   const attachmentQueueRef = useRef(attachmentQueue);
   const compressionQueueRef = useRef({ pending: [], active: 0 });
+  const compressionScheduleRef = useRef(null);
   attachmentQueueRef.current = attachmentQueue;
 
   useEffect(() => () => {
     attachmentQueueRef.current.forEach((item) => {
       if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
     });
+    voiceRecorderRef.current?.cancel();
+    voiceRecorderRef.current = null;
+    previewAudioRef.current?.pause();
+    if (voicePreviewRef.current?.url) URL.revokeObjectURL(voicePreviewRef.current.url);
+    voicePreviewRef.current = null;
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingActiveRef.current && data.chatId && currentUser?.uid) {
+        typingActiveRef.current = false;
+        lastTypingWriteAtRef.current = 0;
+        updateDoc(
+          doc(db, "chats", data.chatId),
+          new FieldPath("typing", currentUser.uid),
+          false
+        ).catch((error) => console.error("Could not clear typing state:", error));
+      }
+    };
+  }, [data.chatId, currentUser?.uid]);
+
+  const revokeVoicePreview = useCallback((preview = voicePreviewRef.current) => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    if (!preview || voicePreviewRef.current === preview) {
+      voicePreviewRef.current = null;
+      setVoicePreview(null);
+      setPreviewPlaying(false);
+      setPreviewTime(0);
+      previewNeedsDurationFixRef.current = false;
+    }
+  }, []);
+
+  const cancelVoiceRecording = useCallback((discardPreview = true) => {
+    voiceRecorderStartingRef.current = false;
+    voiceRecorderRef.current?.cancel();
+    voiceRecorderRef.current = null;
+    previewAudioRef.current?.pause();
+    setVoiceStage("idle");
+    setVoiceElapsed(0);
+    setVoiceWaveform(emptyVoiceWaveform());
+    setVoiceNotice("");
+    voiceRecorderNoticeRef.current = "";
+    if (discardPreview) revokeVoicePreview();
+  }, [revokeVoicePreview, setVoiceStage]);
+
+  useEffect(() => {
+    const previous = voiceOwnerRef.current;
+    if (
+      (previous.chatId && previous.chatId !== data.chatId) ||
+      (previous.uid && previous.uid !== currentUser?.uid)
+    ) {
+      cancelVoiceRecording();
+    }
+    voiceOwnerRef.current = { chatId: data.chatId, uid: currentUser?.uid };
+  }, [data.chatId, currentUser?.uid, cancelVoiceRecording]);
+
+  useEffect(() => {
+    if (!["requesting", "recording", "preview"].includes(voiceState)) return undefined;
+    const handleVoiceEscape = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelVoiceRecording();
+      }
+    };
+    document.addEventListener("keydown", handleVoiceEscape);
+    return () => document.removeEventListener("keydown", handleVoiceEscape);
+  }, [voiceState, cancelVoiceRecording]);
+
+  useEffect(() => {
+    forwardJobsRef.current.clear();
+    setForwardingBusy(false);
+    setForwardingChatId("");
+    setForwardError("");
+  }, [forwardingMessage?.id]);
+
+  useEffect(() => {
+    if (!forwardingMessage) return undefined;
+    const handleForwardEscape = (event) => {
+      if (event.key === "Escape" && !forwardingBusy) {
+        setForwardingMessage(null);
+      }
+    };
+    window.addEventListener("keydown", handleForwardEscape);
+    return () => window.removeEventListener("keydown", handleForwardEscape);
+  }, [forwardingMessage, forwardingBusy, setForwardingMessage]);
 
   useEffect(() => {
     if (!data.chatId) return;
@@ -206,18 +327,43 @@ const Input = () => {
         senderId: replyingTo.senderId || "",
         senderName: replyingTo.senderName || "User",
         text: String(replyingTo.text || "").slice(0, 100),
-        type: ["text", "gif", "image"].includes(replyingTo.type) ? replyingTo.type : "text",
+        type: ["text", "gif", "image", "audio"].includes(replyingTo.type) ? replyingTo.type : "text",
+        ...(replyingTo.img ? { img: replyingTo.img } : {}),
+        ...(replyingTo.type === "audio" && Number.isFinite(replyingTo.duration) ? { duration: replyingTo.duration } : {}),
       },
     };
   };
 
   const stopTyping = () => {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    if (data.chatId) {
-      updateDoc(doc(db, "chats", data.chatId), {
-        [`typing.${currentUser.uid}`]: false
-      }).catch(() => { });
+    typingTimeoutRef.current = null;
+    lastTypingWriteAtRef.current = 0;
+    if (data.chatId && currentUser?.uid && typingActiveRef.current) {
+      typingActiveRef.current = false;
+      updateDoc(
+        doc(db, "chats", data.chatId),
+        new FieldPath("typing", currentUser.uid),
+        false
+      ).catch((error) =>
+        console.error("Could not clear typing state:", error)
+      );
     }
+  };
+
+  const markTyping = () => {
+    if (!data.chatId || !currentUser?.uid) return;
+    const now = Date.now();
+    if (!typingActiveRef.current || now - lastTypingWriteAtRef.current >= 2000) {
+      lastTypingWriteAtRef.current = now;
+      typingActiveRef.current = true;
+      updateDoc(
+        doc(db, "chats", data.chatId),
+        new FieldPath("typing", currentUser.uid),
+        true
+      ).catch((error) => console.error("Could not update typing state:", error));
+    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(stopTyping, 2000);
   };
 
   const persistDraft = (nextValue) => {
@@ -268,10 +414,35 @@ const Input = () => {
     }
   }, []);
 
+  const scheduleCompressionDrain = useCallback(() => {
+    if (compressionScheduleRef.current) return;
+    const run = () => {
+      compressionScheduleRef.current = null;
+      drainCompressionQueue();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(run, { timeout: 1500 });
+      compressionScheduleRef.current = { kind: "idle", id };
+    } else {
+      const id = window.setTimeout(run, 1000);
+      compressionScheduleRef.current = { kind: "timeout", id };
+    }
+  }, [drainCompressionQueue]);
+
   const scheduleImageCompression = useCallback((item) => {
     compressionQueueRef.current.pending.push(item);
-    drainCompressionQueue();
-  }, [drainCompressionQueue]);
+    scheduleCompressionDrain();
+  }, [scheduleCompressionDrain]);
+
+  useEffect(() => () => {
+    const scheduled = compressionScheduleRef.current;
+    if (!scheduled) return;
+    if (scheduled.kind === "idle" && typeof window.cancelIdleCallback === "function") {
+      window.cancelIdleCallback(scheduled.id);
+    } else if (scheduled.kind === "timeout") {
+      window.clearTimeout(scheduled.id);
+    }
+  }, []);
 
   const handleFilesAdded = useCallback((incomingFiles) => {
     const files = Array.from(incomingFiles || []).filter(Boolean);
@@ -456,117 +627,478 @@ const Input = () => {
     };
   }, [data.chatId, handleFilesAdded]);
 
-  const ensureChatDocAndUserChats = async (lastMsgText) => {
-    if (!data.chatId) return;
-
-    const chatRef = doc(db, "chats", data.chatId);
-    const chatSnap = await getDoc(chatRef);
-    if (!chatSnap.exists()) {
-      await setDoc(chatRef, { messages: [], typing: {}, lastRead: {} }, { merge: true });
-    }
-
-    if (data.user?.isGroup && data.user?.members) {
-      for (const member of data.user.members) {
-        await updateDoc(doc(db, "userChats", member.uid), {
-          [`${data.chatId}.userInfo`]: data.user,
-          [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-          [`${data.chatId}.date`]: serverTimestamp(),
-          [`${data.chatId}.unread`]: member.uid === currentUser.uid ? 0 : increment(1),
-        }).catch(async () => {
-          await setDoc(doc(db, "userChats", member.uid), {
-            [data.chatId]: {
-              userInfo: data.user,
-              lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-              date: serverTimestamp(),
-              unread: member.uid === currentUser.uid ? 0 : 1,
-            }
-          }, { merge: true });
-        });
-      }
-    } else if (data.user?.uid) {
-      await updateDoc(doc(db, "userChats", currentUser.uid), {
-        [`${data.chatId}.userInfo`]: {
-          uid: data.user.uid,
-          displayName: data.user.displayName,
-          photoURL: data.user.photoURL,
-        },
-        [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-        [`${data.chatId}.date`]: serverTimestamp(),
-      }).catch(async () => {
-        await setDoc(doc(db, "userChats", currentUser.uid), {
-          [data.chatId]: {
-            userInfo: {
-              uid: data.user.uid,
-              displayName: data.user.displayName,
-              photoURL: data.user.photoURL,
-            },
-            lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-            date: serverTimestamp(),
-          }
-        }, { merge: true });
-      });
-
-      await updateDoc(doc(db, "userChats", data.user.uid), {
-        [`${data.chatId}.userInfo`]: {
-          uid: currentUser.uid,
-          displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL,
-        },
-        [`${data.chatId}.lastMessage`]: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-        [`${data.chatId}.date`]: serverTimestamp(),
-        [`${data.chatId}.unread`]: increment(1),
-      }).catch(async () => {
-        await setDoc(doc(db, "userChats", data.user.uid), {
-          [data.chatId]: {
-            userInfo: {
-              uid: currentUser.uid,
-              displayName: currentUser.displayName,
-              photoURL: currentUser.photoURL,
-            },
-            lastMessage: { text: lastMsgText, senderId: currentUser.uid, date: Date.now() },
-            date: serverTimestamp(),
-            unread: 1,
-          }
-        }, { merge: true });
-      });
-    }
-  };
-
-  const notifyRecipients = async (recipientUids, body) => {
-    if (recipientUids.length === 0) {
+  const notifyRecipients = async (recipientUids, body, chatId = data.chatId) => {
+    const recipientsToNotify = [...new Set(
+      recipientUids.filter((uid) => typeof uid === "string" && uid)
+    )];
+    if (recipientsToNotify.length === 0) {
       console.warn("notify skipped: no recipients");
       return;
     }
 
     try {
       const firebaseUser = auth.currentUser;
-      const idToken = await firebaseUser.getIdToken();
-      const response = await fetch("/api/notify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + idToken,
-        },
-        body: JSON.stringify({
-          chatId: data.chatId,
-          recipientUids,
-          title: currentUser.displayName || "New message",
-          body,
-        }),
-      });
+      if (!firebaseUser) throw new Error("You must be signed in to send notifications.");
+      const requestNotification = async (recipients, forceRefresh) => {
+        const idToken = await firebaseUser.getIdToken(forceRefresh);
+        return fetch("/api/notify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + idToken,
+          },
+          body: JSON.stringify({
+            chatId,
+            recipientUids: recipients,
+            title: (currentUser.displayName || "New message").slice(0, 120),
+            body: String(body || "").slice(0, 1000),
+          }),
+        });
+      };
 
-      if (!response.ok) {
-        console.warn("notify failed", response.status, await response.text());
-        return;
+      for (let offset = 0; offset < recipientsToNotify.length; offset += 50) {
+        const recipients = recipientsToNotify.slice(offset, offset + 50);
+        let response = await requestNotification(recipients, false);
+        if (response.status === 401) response = await requestNotification(recipients, true);
+
+        if (!response.ok) {
+          console.warn("notify failed", response.status, await response.text());
+          continue;
+        }
+
+        console.info("notify ok", await response.json());
       }
-
-      console.info("notify ok", await response.json());
     } catch (error) {
       console.warn("notify error", error);
     }
   };
 
+  const forwardVoiceMessage = async (targetChatId, targetUser) => {
+    if (!forwardingMessage || forwardingBusy) return;
+    setForwardingBusy(true);
+    setForwardingChatId(targetChatId);
+    setForwardError("");
+
+    try {
+      const sourceAudio = forwardingMessage.audio || forwardingMessage.file;
+      if (typeof sourceAudio?.url !== "string" || !sourceAudio.url) {
+        throw new Error("This voice message no longer has an audio file to forward.");
+      }
+
+      let job = forwardJobsRef.current.get(targetChatId);
+      if (!job) {
+        const duration = Number.isFinite(sourceAudio.duration) ? Math.max(0, sourceAudio.duration) : 0;
+        const sourcePeaks = sourceAudio.peaks;
+        const peaks = Array.isArray(sourcePeaks) &&
+          sourcePeaks.length === 40 &&
+          sourcePeaks.every((peak) => Number.isInteger(peak) && peak >= 0 && peak <= 100)
+          ? [...sourcePeaks]
+          : emptyVoiceWaveform();
+        const audio = {
+          url: sourceAudio.url,
+          duration,
+          peaks,
+          mime: sourceAudio.mime || sourceAudio.mimeType || sourceAudio.type || "",
+          size: Number.isFinite(sourceAudio.size) ? sourceAudio.size : 0,
+        };
+        const messageText = `🎤 Voice message${duration > 0 ? ` (${compactVoiceDuration(duration)})` : ""}`;
+        const createdAt = new Date();
+        const payload = {
+          id: uuid(),
+          text: messageText,
+          senderId: currentUser.uid,
+          ...(currentUser.displayName ? { senderName: currentUser.displayName } : {}),
+          ...(currentUser.photoURL ? { senderPhoto: currentUser.photoURL } : {}),
+          date: Timestamp.fromDate(createdAt),
+          type: "audio",
+          audio: { ...audio },
+        };
+        job = {
+          payload,
+          targetUser,
+          messageSaved: false,
+          notified: false,
+        };
+        forwardJobsRef.current.set(targetChatId, job);
+      }
+
+      if (!job.messageSaved) {
+        await writeChatMessages({
+          chatId: targetChatId,
+          messages: [job.payload],
+          lastMessageText: job.payload.text,
+          lastMessageType: "audio",
+          chatUser: job.targetUser,
+          sender: currentUser,
+        });
+        job.messageSaved = true;
+      }
+
+      if (!job.notified) {
+        const recipientUids = job.targetUser?.isGroup
+          ? (job.targetUser.members || []).map((member) => member.uid).filter((uid) => uid && uid !== currentUser.uid)
+          : job.targetUser?.uid
+            ? [job.targetUser.uid]
+            : [];
+        await notifyRecipients(recipientUids, "🎤 Voice message", targetChatId);
+        job.notified = true;
+      }
+
+      setForwardingMessage(null);
+    } catch (error) {
+      console.error("Error forwarding voice message:", error);
+      setForwardError(error.message || "Could not forward this voice message. Please try again.");
+    } finally {
+      setForwardingBusy(false);
+      setForwardingChatId("");
+    }
+  };
+
+  const finishVoicePreview = (result) => {
+    voiceRecorderRef.current = null;
+    voiceRecorderStartingRef.current = false;
+    setVoiceElapsed(result.duration);
+    if (result.duration < 1) {
+      setVoiceStage("idle");
+      setVoiceNotice("Hold on, too short.");
+      setVoiceAnnouncement("Recording was too short.");
+      return;
+    }
+
+    const preview = { ...result, url: URL.createObjectURL(result.blob) };
+    voicePreviewRef.current = preview;
+    setVoicePreview(preview);
+    previewNeedsDurationFixRef.current = false;
+    setPreviewTime(0);
+    setVoiceNotice(voiceRecorderNoticeRef.current);
+    voiceRecorderNoticeRef.current = "";
+    setVoiceAnnouncement(`Recording stopped, ${compactVoiceDuration(result.duration)}`);
+    setVoiceStage("preview");
+  };
+
+  const startVoiceRecording = async () => {
+    if (voiceRecorderStartingRef.current || voiceRecorderRef.current || !data.chatId || !currentUser?.uid) return;
+    if (!isVoiceSupported()) {
+      const reason = typeof window !== "undefined" && !window.isSecureContext
+        ? "Voice recording requires a secure HTTPS connection."
+        : "Voice recording is not supported by this browser.";
+      setVoiceNotice(reason);
+      return;
+    }
+
+    voiceRecorderStartingRef.current = true;
+    setVoiceNotice("");
+    voiceRecorderNoticeRef.current = "";
+    setVoiceAnnouncement("Waiting for microphone.");
+    setVoiceStage("requesting");
+    setVoiceElapsed(0);
+    setVoiceWaveform(emptyVoiceWaveform());
+    pauseActiveVoiceMessage();
+
+    const recorder = new VoiceRecorder({
+      onTick: ({ elapsed, level }) => {
+        setVoiceElapsed(elapsed);
+        setVoiceWaveform((current) => [...current.slice(-39), level]);
+      },
+      onError: (message) => {
+        voiceRecorderNoticeRef.current = message;
+        setVoiceNotice(message);
+      },
+      onComplete: finishVoicePreview,
+    });
+    voiceRecorderRef.current = recorder;
+    try {
+      await recorder.start();
+      if (voiceRecorderRef.current !== recorder) return;
+      voiceRecorderStartingRef.current = false;
+      setVoiceStage("recording");
+      setVoiceAnnouncement("Recording started.");
+      if (process.env.NODE_ENV !== "production") {
+        console.info("Voice recording started", { mimeType: recorder.recorder?.mimeType || "" });
+      }
+    } catch (error) {
+      if (voiceRecorderRef.current !== recorder) return;
+      voiceRecorderRef.current = null;
+      voiceRecorderStartingRef.current = false;
+      setVoiceStage("idle");
+      setVoiceNotice(error?.message || "Could not start the microphone. Please try again.");
+      setVoiceAnnouncement("Microphone could not be started.");
+    }
+  };
+
+  const stopVoiceRecording = async (sendImmediately = false) => {
+    const recorder = voiceRecorderRef.current;
+    if (!recorder) return;
+    voiceRecorderStartingRef.current = false;
+    try {
+      const result = await recorder.stop();
+      if (voiceRecorderRef.current !== recorder || !result) return;
+      if (sendImmediately) {
+        voiceRecorderRef.current = null;
+        if (result.duration < 1) {
+          setVoiceStage("idle");
+          setVoiceNotice("Hold on, too short.");
+          setVoiceAnnouncement("Recording was too short.");
+          return;
+        }
+        await sendVoiceRecording(result);
+      } else {
+        finishVoicePreview(result);
+      }
+    } catch (error) {
+      if (voiceRecorderRef.current !== recorder) return;
+      voiceRecorderRef.current = null;
+      setVoiceStage("idle");
+      setVoiceNotice(error?.message || "Could not stop the recording.");
+    }
+  };
+
+  const buildVoiceReplyPayload = () => {
+    const source = replyingTo || editingMessage;
+    if (!source) return {};
+    const sourceIsAudio = source.type === "audio" || Boolean(source.audio) || source.file?.mime?.startsWith("audio/");
+    return {
+      replyTo: {
+        id: source.id || "",
+        senderId: source.senderId || "",
+        senderName: source.senderName || "User",
+        text: String(source.text || "").slice(0, 100),
+        type: sourceIsAudio ? "audio" : ["text", "gif", "image"].includes(source.type) ? source.type : "text",
+        ...(sourceIsAudio && Number.isFinite(source.audio?.duration ?? source.file?.duration ?? source.duration)
+          ? { duration: source.audio?.duration ?? source.file?.duration ?? source.duration }
+          : {}),
+      },
+    };
+  };
+
+  const sendVoiceRecording = async (recording) => {
+    if (!data.chatId || !currentUser?.uid || !recording?.blob) return;
+    const messageId = uuid();
+    const chatId = data.chatId;
+    const optimisticDate = new Date();
+    const duration = Math.round(recording.duration * 10) / 10;
+    const mime = recording.mime || recording.blob.type || "";
+    const extension = getVoiceFileExtension(mime);
+    const file = new File(
+      [recording.blob],
+      `voice-${optimisticDate.getTime()}${extension ? `.${extension}` : ""}`,
+      { type: mime }
+    );
+    const localUrl = voicePreviewRef.current?.blob === recording.blob
+      ? voicePreviewRef.current.url
+      : recording.url || URL.createObjectURL(recording.blob);
+    const replyPayload = buildVoiceReplyPayload();
+    const lastMessageText = `🎤 Voice message (${compactVoiceDuration(duration)})`;
+    const job = {
+      chatId,
+      localUrl,
+      file,
+      recording,
+      uploaded: null,
+      controller: null,
+      cancelled: false,
+      messageCommitted: false,
+      notified: false,
+      payloadDate: Timestamp.fromDate(optimisticDate),
+      replyPayload,
+    };
+    const cancelUpload = () => {
+      job.cancelled = true;
+      job.controller?.abort();
+      pendingMessagesStore.removeMessage(chatId, messageId);
+      URL.revokeObjectURL(localUrl);
+    };
+
+    const deleteVoiceMessage = async () => {
+      if (job.messageCommitted) {
+        try {
+          const chatRef = doc(db, "chats", chatId);
+          await runTransaction(db, async (transaction) => {
+            const chatSnap = await transaction.get(chatRef);
+            if (!chatSnap.exists()) return;
+            const messages = Array.isArray(chatSnap.data().messages)
+              ? chatSnap.data().messages
+              : [];
+            transaction.update(chatRef, {
+              messages: messages.filter((message) => message.id !== messageId),
+            });
+          });
+        } catch (error) {
+          console.error("Error deleting failed voice message:", error);
+          pendingMessagesStore.updateMessage(chatId, messageId, {
+            error: "Could not delete the failed voice message. Please try again.",
+          });
+          return;
+        }
+      }
+      cancelUpload();
+    };
+
+    const retryUpload = () => {
+      job.cancelled = false;
+      if (voiceOwnerRef.current.chatId === chatId && voiceOwnerRef.current.uid === currentUser.uid) {
+        setVoiceStage("uploading");
+        setVoiceAnnouncement("Retrying voice message upload.");
+      }
+      return uploadAndSend();
+    };
+
+    const optimisticMessage = {
+      id: messageId,
+      text: "🎤 Voice message",
+      senderId: currentUser.uid,
+      ...(currentUser.displayName ? { senderName: currentUser.displayName } : {}),
+      ...(currentUser.photoURL ? { senderPhoto: currentUser.photoURL } : {}),
+      date: optimisticDate,
+      type: "audio",
+      audio: { url: localUrl, duration, peaks: recording.peaks, mime, size: recording.blob.size },
+      localUrl,
+      status: "uploading",
+      uploadProgress: 0,
+      retry: retryUpload,
+      cancel: cancelUpload,
+      delete: deleteVoiceMessage,
+      ...replyPayload,
+    };
+    pendingMessagesStore.addMessage(chatId, optimisticMessage);
+    voicePreviewRef.current = null;
+    setVoicePreview(null);
+    setPreviewTime(0);
+    setVoiceNotice("");
+    setVoiceAnnouncement("Uploading voice message.");
+    setVoiceStage("uploading");
+    setReplyingTo(null);
+    setEditingMessage(null);
+    inputRef.current?.focus();
+
+    const uploadAndSend = async () => {
+      if (job.cancelled) return;
+      const updatePending = (changes) => pendingMessagesStore.updateMessage(chatId, messageId, changes);
+      job.controller = new AbortController();
+      updatePending({ status: "uploading", uploadProgress: 0, error: "" });
+      try {
+        if (!navigator.onLine) throw new Error("You are offline. Reconnect and retry this voice message.");
+        if (recording.blob.size > MAX_AUDIO_MB * 1024 * 1024) {
+          throw new Error(`Voice messages must be ${MAX_AUDIO_MB} MB or smaller.`);
+        }
+        if (!job.uploaded) {
+          job.uploaded = await uploadFile(file, {
+            folder: "chathere/chat",
+            resourceType: "video",
+            signal: job.controller.signal,
+            onProgress: (progress) => updatePending({ uploadProgress: progress }),
+          });
+          if (process.env.NODE_ENV !== "production") {
+            console.info("Voice upload completed", {
+              mimeType: mime,
+              blobSize: recording.blob.size,
+              duration,
+              cloudinaryResponseSize: job.uploaded.bytes,
+            });
+          }
+        }
+
+        if (job.cancelled) return;
+        updatePending({ status: "sending", uploadProgress: 100 });
+        const audio = {
+          url: job.uploaded.url,
+          duration,
+          peaks: recording.peaks,
+          mime,
+          size: Number.isFinite(job.uploaded.bytes) ? job.uploaded.bytes : recording.blob.size,
+        };
+        const payload = {
+          id: messageId,
+          text: lastMessageText,
+          senderId: currentUser.uid,
+          ...(currentUser.displayName ? { senderName: currentUser.displayName } : {}),
+          ...(currentUser.photoURL ? { senderPhoto: currentUser.photoURL } : {}),
+          date: job.payloadDate,
+          type: "audio",
+          audio,
+          ...replyPayload,
+        };
+        if (!job.messageCommitted) {
+          await writeChatMessages({
+            chatId,
+            messages: [payload],
+            lastMessageText,
+            lastMessageType: "audio",
+            chatUser: data.user,
+            sender: currentUser,
+          });
+          job.messageCommitted = true;
+          }
+        const recipientUids = data.user?.isGroup
+          ? (data.user.members || []).map((member) => member.uid).filter((uid) => uid && uid !== currentUser.uid)
+          : data.user?.uid
+            ? [data.user.uid]
+            : [];
+        if (!job.notified) {
+          void notifyRecipients(recipientUids, "🎤 Voice message");
+          job.notified = true;
+        }
+        updatePending({ status: "sending", audio, text: lastMessageText, uploadProgress: 100 });
+        URL.revokeObjectURL(localUrl);
+        setVoiceAnnouncement(`Voice message sent, ${compactVoiceDuration(duration)}.`);
+        if (voiceStateRef.current === "uploading") {
+          setVoiceStage("sent");
+          window.setTimeout(() => {
+            if (voiceStateRef.current === "sent") setVoiceStage("idle");
+          }, 700);
+        }
+      } catch (error) {
+        if (job.cancelled) return;
+        job.controller = null;
+        updatePending({
+          status: "failed",
+          error: error?.message || "Voice message upload failed.",
+          uploadProgress: 0,
+          retry: retryUpload,
+          cancel: cancelUpload,
+          delete: deleteVoiceMessage,
+        });
+        setVoiceAnnouncement("Voice message failed to send.");
+        if (voiceStateRef.current === "uploading") {
+          setVoiceStage("failed");
+          window.setTimeout(() => {
+            if (voiceStateRef.current === "failed") setVoiceStage("idle");
+          }, 1200);
+        }
+      }
+    };
+
+    await uploadAndSend();
+  };
+
+  const sendVoicePreview = async () => {
+    const preview = voicePreviewRef.current;
+    if (!preview) return;
+    previewAudioRef.current?.pause();
+    await sendVoiceRecording(preview);
+  };
+
+  const seekVoicePreview = (event) => {
+    const audio = previewAudioRef.current;
+    const bounds = previewSliderRef.current?.getBoundingClientRect();
+    if (!audio || !bounds || !voicePreview) return;
+    const fraction = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const nextTime = fraction * voicePreview.duration;
+    audio.currentTime = nextTime;
+    setPreviewTime(nextTime);
+  };
+
   const handleSend = async () => {
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
+    try {
+      await performSend();
+    } finally {
+      sendInFlightRef.current = false;
+    }
+  };
+
+  const performSend = async () => {
     const msgText = text.trim();
     if (!data.chatId) return;
 
@@ -631,6 +1163,8 @@ const Input = () => {
               size: file.size,
               mime,
               resourceType: result.resourceType || "video",
+              ...(Number.isFinite(result.width) ? { width: result.width } : {}),
+              ...(Number.isFinite(result.height) ? { height: result.height } : {}),
             },
             ...getReplyPayload(),
           };
@@ -656,21 +1190,15 @@ const Input = () => {
       });
 
       try {
-        const chatRef = doc(db, "chats", data.chatId);
-        try {
-          await updateDoc(chatRef, {
-            messages: arrayUnion(...basePayloads),
-          });
-        } catch (updateErr) {
-          await setDoc(chatRef, {
-            messages: basePayloads,
-            typing: {},
-            lastRead: {},
-          }, { merge: true });
-        }
-
         const messageBody = basePayloads[0]?.text || "📎 File";
-        await ensureChatDocAndUserChats(messageBody);
+        await writeChatMessages({
+          chatId: data.chatId,
+          messages: basePayloads,
+          lastMessageText: messageBody,
+          lastMessageType: basePayloads[0]?.type,
+          chatUser: data.user,
+          sender: currentUser,
+        });
         const recipientUids = data.user?.isGroup
           ? (data.user.members || []).map((member) => member.uid).filter((uid) => uid && uid !== currentUser.uid)
           : data.user?.uid
@@ -679,6 +1207,7 @@ const Input = () => {
         void notifyRecipients(recipientUids, messageBody);
       } catch (error) {
         console.error("Error sending attachment message:", error);
+        setVoiceNotice(error?.message || "Could not send this attachment. Please try again.");
         return;
       }
 
@@ -733,13 +1262,13 @@ const Input = () => {
               const chatEntry = userChatsData[data.chatId];
               if (!chatEntry || !chatEntry.lastMessage) continue;
               transaction.update(userChatsRef, {
-                [`${data.chatId}.lastMessage.text`]: msgText,
-              });
+              }, new FieldPath(data.chatId, "lastMessage", "text"), msgText);
             }
           }
         });
       } catch (error) {
         console.error("Error editing message:", error);
+        setVoiceNotice(error?.message || "Could not save this edit. Please try again.");
         return;
       }
 
@@ -775,9 +1304,8 @@ const Input = () => {
 
     pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
 
-    (async () => {
+    await (async () => {
       try {
-        const chatRef = doc(db, "chats", data.chatId);
         const payload = {
           id: msgId,
           text: msgText,
@@ -788,19 +1316,13 @@ const Input = () => {
           ...getReplyPayload(),
         };
 
-        try {
-          await updateDoc(chatRef, {
-            messages: arrayUnion(payload),
-          });
-        } catch (updateErr) {
-          await setDoc(chatRef, {
-            messages: [payload],
-            typing: {},
-            lastRead: {},
-          }, { merge: true });
-        }
-
-        await ensureChatDocAndUserChats(msgText);
+        await writeChatMessages({
+          chatId: data.chatId,
+          messages: [payload],
+          lastMessageText: msgText,
+          chatUser: data.user,
+          sender: currentUser,
+        });
 
         const recipientUids = data.user?.isGroup
           ? (data.user.members || [])
@@ -818,7 +1340,9 @@ const Input = () => {
     })();
   };
 
-  const handleGifSend = (gifUrl) => {
+  const handleGifSend = async (gifUrl, gif = {}) => {
+    if (!data.chatId || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     setShowGifPicker(false);
     const msgText = text.trim();
     setText("");
@@ -827,8 +1351,6 @@ const Input = () => {
     inputRef.current?.focus();
     requestAnimationFrame(() => inputRef.current?.focus());
 
-    if (!data.chatId) return;
-
     const msgId = uuid();
     const optimisticDate = new Date();
 
@@ -836,6 +1358,12 @@ const Input = () => {
       id: msgId,
       text: msgText,
       img: gifUrl,
+      type: "gif",
+      ...(Number.isFinite(gif.width) ? { width: gif.width } : {}),
+      ...(Number.isFinite(gif.height) ? { height: gif.height } : {}),
+      ...(gif.gifPreview ? { gifPreview: gif.gifPreview } : {}),
+      ...(gif.gifMp4 ? { gifMp4: gif.gifMp4 } : {}),
+      ...(gif.gifWebm ? { gifWebm: gif.gifWebm } : {}),
       senderId: currentUser.uid,
       senderName: currentUser.displayName,
       senderPhoto: currentUser.photoURL,
@@ -846,9 +1374,9 @@ const Input = () => {
 
     pendingMessagesStore.addMessage(data.chatId, optimisticMsg);
 
-    (async () => {
+    try {
+      await (async () => {
       try {
-        const chatRef = doc(db, "chats", data.chatId);
         const payload = {
           id: msgId,
           text: msgText,
@@ -857,22 +1385,23 @@ const Input = () => {
           senderPhoto: currentUser.photoURL,
           date: Timestamp.fromDate(optimisticDate),
           img: gifUrl,
+          type: "gif",
+          ...(Number.isFinite(gif.width) ? { width: gif.width } : {}),
+          ...(Number.isFinite(gif.height) ? { height: gif.height } : {}),
+          ...(gif.gifPreview ? { gifPreview: gif.gifPreview } : {}),
+          ...(gif.gifMp4 ? { gifMp4: gif.gifMp4 } : {}),
+          ...(gif.gifWebm ? { gifWebm: gif.gifWebm } : {}),
           ...getReplyPayload(),
         };
 
-        try {
-          await updateDoc(chatRef, {
-            messages: arrayUnion(payload),
-          });
-        } catch (updateErr) {
-          await setDoc(chatRef, {
-            messages: [payload],
-            typing: {},
-            lastRead: {},
-          }, { merge: true });
-        }
-
-        await ensureChatDocAndUserChats(msgText || "Sent a GIF");
+        await writeChatMessages({
+          chatId: data.chatId,
+          messages: [payload],
+          lastMessageText: msgText || "Sent a GIF",
+          lastMessageType: "gif",
+          chatUser: data.user,
+          sender: currentUser,
+        });
 
         const recipientUids = data.user?.isGroup
           ? (data.user.members || [])
@@ -887,7 +1416,10 @@ const Input = () => {
         console.error("Error sending GIF:", err);
         pendingMessagesStore.updateMessageStatus(data.chatId, msgId, "failed");
       }
-    })();
+      })();
+    } finally {
+      sendInFlightRef.current = false;
+    }
   };
 
   const handleImageSelect = (event) => {
@@ -937,7 +1469,7 @@ const Input = () => {
         const nextValue = lastOwnText.text || "";
         draftsRef.current[data.chatId] = nextValue;
         setText(nextValue);
-      }).catch(() => {});
+      }).catch((error) => console.error("Could not load the previous message for editing:", error));
       return;
     }
 
@@ -966,14 +1498,7 @@ const Input = () => {
     requestAnimationFrame(() => inputRef.current?.focus());
 
     if (data.chatId) {
-      updateDoc(doc(db, "chats", data.chatId), {
-        [`typing.${currentUser.uid}`]: true
-      }).catch(() => { });
-
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        stopTyping();
-      }, 2000);
+    markTyping();
     }
   };
 
@@ -981,16 +1506,7 @@ const Input = () => {
     const nextValue = e.target.value;
     persistDraft(nextValue);
 
-    if (data.chatId) {
-      updateDoc(doc(db, "chats", data.chatId), {
-        [`typing.${currentUser.uid}`]: true
-      }).catch(() => { });
-
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = setTimeout(() => {
-        stopTyping();
-      }, 2000);
-    }
+    markTyping();
   };
 
   const [canHover, setCanHover] = useState(false);
@@ -1005,6 +1521,17 @@ const Input = () => {
   const hdCapableImageItems = imageItems.filter((item) => isHdCapableImage(item.file));
   const allImagesHd = hdCapableImageItems.length > 0 && hdCapableImageItems.every((item) => item.hd);
   const mixedImageHd = hdCapableImageItems.some((item) => item.hd) && !allImagesHd;
+  const voiceSupported = isVoiceSupported();
+  const voiceSupportMessage = typeof window !== "undefined" && !window.isSecureContext
+    ? "Voice recording requires a secure HTTPS connection."
+    : "Voice recording is not supported by this browser.";
+  const voiceComposerActive = ["requesting", "recording", "preview"].includes(voiceState);
+  const hasComposerContent = Boolean(text.trim() || attachmentQueue.length);
+  const forwardTargets = Object.entries(userChats || {})
+    .filter(([, chat]) => chat?.userInfo?.isGroup || chat?.userInfo?.uid)
+    .sort(([, first], [, second]) =>
+      (first.userInfo.displayName || first.userInfo.name || "").localeCompare(second.userInfo.displayName || second.userInfo.name || "")
+    );
 
   useEffect(() => {
     if (text.trim() || attachmentQueue.length > 0) setShowQuickActions(false);
@@ -1035,6 +1562,8 @@ const Input = () => {
                       ? "📷 Photo"
                       : replyingTo?.type === "gif"
                         ? "GIF"
+                        : replyingTo?.type === "audio"
+                          ? `🎤 Voice message${Number.isFinite(replyingTo.duration) ? ` ${compactVoiceDuration(replyingTo.duration)}` : ""}`
                         : replyingTo?.text || "Message"}
                 </p>
               </div>
@@ -1061,73 +1590,308 @@ const Input = () => {
       <div className="flex items-end gap-2">
         <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
 
-        <div ref={pickerRef} className="composer-pill glass glass-pill relative flex min-h-12 min-w-0 flex-1 items-end gap-1.5 px-2 py-1.5">
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowGifPicker(false); }}
-            className={`icon-btn-glass h-9 w-9 flex-shrink-0 border-0 bg-transparent ${showEmojiPicker ? "text-[var(--primary-text)]" : ""}`}
-            aria-label="Emoji and sticker picker"
-            title="Emoji and sticker picker"
-          >
-            <Smile size={19} />
-          </button>
-
-          <div className="relative flex min-w-0 flex-1 items-end">
-          <AnimatePresence>
-            {(showEmojiPicker || showGifPicker) && (
+        <div ref={pickerRef} className="composer-pill glass glass-pill relative flex min-h-12 min-w-0 flex-1 items-center px-1.5 py-1">
+          <AnimatePresence initial={false} mode="wait">
+            {voiceComposerActive ? (
               <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-                className="glass absolute bottom-full left-0 z-50 mb-2 overflow-hidden p-1"
+                key="voice-composer"
+                layout={!shouldReduceMotion}
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+                className="flex min-h-11 w-full min-w-0 items-center gap-2"
               >
-                {showEmojiPicker ? (
-                  <div className="emoji-picker-ember">
-                    <EmojiPicker
-                      onEmojiClick={onEmojiClick}
-                      width={300}
-                      height={380}
-                      theme={theme === "dark" ? "dark" : "light"}
-                      lazyLoadEmojis
-                    />
+                <button
+                  type="button"
+                  onClick={() => cancelVoiceRecording()}
+                  className="icon-btn-glass min-h-11 min-w-11 shrink-0 border-0 bg-transparent text-[var(--danger-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                  aria-label={voiceState === "preview" ? "Discard voice message" : "Cancel recording"}
+                  title={voiceState === "preview" ? "Discard recording" : "Cancel recording"}
+                >
+                  <Trash2 size={18} />
+                </button>
+                {voiceState === "requesting" ? (
+                  <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
+                    <Loader2 size={16} className={shouldReduceMotion ? "" : "animate-spin"} aria-hidden="true" />
+                    <span className="truncate">Waiting for microphone...</span>
                   </div>
+                ) : voiceState === "recording" ? (
+                  <>
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--danger-text)] ${shouldReduceMotion ? "" : "animate-pulse"}`} aria-label="Recording" />
+                    <span className={`shrink-0 font-mono text-sm tabular-nums ${voiceElapsed >= 270 ? "text-[var(--danger-text)]" : "text-[var(--text-primary)]"}`}>
+                      {compactVoiceDuration(voiceElapsed)}
+                    </span>
+                    <div className="flex h-9 min-w-0 flex-1 items-center justify-between gap-[2px] overflow-hidden" aria-label="Live recording waveform">
+                      {voiceWaveform.map((level, index) => (
+                        <span
+                          key={index}
+                          className="min-w-[2px] flex-1 rounded-full bg-[var(--primary)]"
+                          style={{
+                            height: shouldReduceMotion ? "12px" : "32px",
+                            transform: shouldReduceMotion
+                              ? "none"
+                              : `scaleY(${Math.max(0.125, Math.min(1, level / 100))})`,
+                            transformOrigin: "center",
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => stopVoiceRecording(false)}
+                      className="icon-btn-glass min-h-11 min-w-11 shrink-0 border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                      aria-label="Stop recording and preview"
+                      title="Stop recording"
+                    >
+                      <Square size={18} fill="currentColor" />
+                    </button>
+                  </>
                 ) : (
-                  <GifPicker onGifSelect={handleGifSend} />
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const audio = previewAudioRef.current;
+                        if (!audio) return;
+                        if (audio.paused) audio.play().catch(() => setVoiceNotice("Could not play the recording preview."));
+                        else audio.pause();
+                      }}
+                      className="icon-btn-glass min-h-11 min-w-11 shrink-0 border-0 bg-transparent text-[var(--primary-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                      aria-label={previewPlaying ? "Pause recording preview" : "Play recording preview"}
+                    >
+                      {previewPlaying ? <Pause size={18} /> : <Play size={18} fill="currentColor" />}
+                    </button>
+                    <div
+                      ref={previewSliderRef}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Recording preview position"
+                      aria-valuemin={0}
+                      aria-valuemax={Math.round(voicePreview?.duration || 0)}
+                      aria-valuenow={Math.round(previewTime)}
+                      onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        seekVoicePreview(event);
+                      }}
+                      onPointerMove={(event) => {
+                        if (event.buttons) seekVoicePreview(event);
+                      }}
+                      onPointerUp={seekVoicePreview}
+                      onKeyDown={(event) => {
+                        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+                        event.preventDefault();
+                        const step = event.key === "ArrowRight" ? 5 : -5;
+                        const audio = previewAudioRef.current;
+                        if (!audio || !voicePreview) return;
+                        const nextTime = Math.max(0, Math.min(voicePreview.duration, audio.currentTime + step));
+                        audio.currentTime = nextTime;
+                        setPreviewTime(nextTime);
+                      }}
+                      className="flex h-11 min-w-0 flex-1 cursor-pointer items-center gap-[2px] rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                      style={{ touchAction: "none" }}
+                    >
+                      {(voicePreview?.peaks || emptyVoiceWaveform()).map((peak, index) => (
+                        <span
+                          key={index}
+                          className="min-w-[2px] flex-1 rounded-full"
+                          style={{
+                            height: `${Math.max(4, Math.min(30, peak * 0.3))}px`,
+                            background: index / 40 < (voicePreview?.duration ? previewTime / voicePreview.duration : 0)
+                              ? "var(--primary)"
+                              : "var(--text-muted)",
+                            opacity: index / 40 < (voicePreview?.duration ? previewTime / voicePreview.duration : 0) ? 1 : 0.55,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                      {compactVoiceDuration(voicePreview?.duration || 0)}
+                    </span>
+                    <audio
+                      ref={previewAudioRef}
+                      src={voicePreview?.url}
+                      preload="auto"
+                      onLoadedMetadata={(event) => {
+                        if (!Number.isFinite(event.currentTarget.duration)) {
+                          previewNeedsDurationFixRef.current = true;
+                          try {
+                            event.currentTarget.currentTime = 1e101;
+                          } catch {
+                            previewNeedsDurationFixRef.current = false;
+                            setVoiceNotice("Could not prepare recording duration; the saved duration will be used.");
+                          }
+                        }
+                      }}
+                      onDurationChange={(event) => {
+                        if (previewNeedsDurationFixRef.current && Number.isFinite(event.currentTarget.duration)) {
+                          try {
+                            event.currentTarget.currentTime = 0;
+                          } catch {
+                            setVoiceNotice("Could not seek this preview; you can still send the recording.");
+                          }
+                          previewNeedsDurationFixRef.current = false;
+                          setPreviewTime(0);
+                        }
+                      }}
+                      onTimeUpdate={(event) => {
+                        if (!previewNeedsDurationFixRef.current) setPreviewTime(event.currentTarget.currentTime);
+                      }}
+                      onPlay={(event) => {
+                        setPreviewPlaying(true);
+                        activateVoiceMessage("local-preview", event.currentTarget);
+                      }}
+                      onPause={(event) => {
+                        setPreviewPlaying(false);
+                        deactivateVoiceMessage(event.currentTarget);
+                      }}
+                      onEnded={(event) => {
+                        setPreviewPlaying(false);
+                        setPreviewTime(0);
+                        deactivateVoiceMessage(event.currentTarget);
+                      }}
+                      onError={() => setVoiceNotice("Could not load the recording preview. You can still send it or discard it.")}
+                      className="hidden"
+                      aria-label="Voice message preview"
+                    />
+                  </>
                 )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="message-composer"
+                layout={!shouldReduceMotion}
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+                className="flex min-h-11 w-full min-w-0 items-end gap-1"
+              >
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    if (showEmojiPicker || showGifPicker) {
+                      setShowEmojiPicker(false);
+                      setShowGifPicker(false);
+                    } else {
+                      setShowEmojiPicker(true);
+                    }
+                  }}
+                  className={`icon-btn-glass min-h-11 min-w-11 shrink-0 border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${showEmojiPicker ? "text-[var(--primary-text)]" : ""}`}
+                  aria-label="Emoji and sticker picker"
+                  title="Emoji and sticker picker"
+                  onPointerEnter={() => {
+                    import("./GifPicker").catch((error) => console.error("Could not preload GIF picker:", error));
+                  }}
+                  onFocus={() => {
+                    import("./GifPicker").catch((error) => console.error("Could not preload GIF picker:", error));
+                  }}
+                  onTouchStart={() => {
+                    import("./GifPicker").catch((error) => console.error("Could not preload GIF picker:", error));
+                  }}
+                >
+                  <Smile size={19} />
+                </button>
+
+                <div className="relative flex min-h-11 min-w-0 flex-1 items-end">
+                  <AnimatePresence>
+                    {(showEmojiPicker || showGifPicker) && (
+                      <motion.div
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
+                        className="glass absolute bottom-full left-0 z-50 mb-2 overflow-hidden p-1"
+                      >
+                        <div className="flex gap-1 border-b border-[var(--border)] p-1">
+                          <button type="button" onClick={() => { setShowEmojiPicker(true); setShowGifPicker(false); }} className={`chip min-h-11 flex-1 justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${showEmojiPicker ? "chip-active" : ""}`}>Emoji</button>
+                          <button type="button" onClick={() => { setShowEmojiPicker(false); setShowGifPicker(true); }} className={`chip min-h-11 flex-1 justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${showGifPicker ? "chip-active" : ""}`}>GIF / Sticker</button>
+                        </div>
+                        {showEmojiPicker ? (
+                          <div className="emoji-picker-ember">
+                            <Suspense fallback={<div className="h-[380px] w-[300px] animate-pulse bg-[var(--surface-2)]" aria-label="Loading emoji picker" />}>
+                              <EmojiPicker
+                                onEmojiClick={onEmojiClick}
+                                width={300}
+                                height={380}
+                                theme={theme === "dark" ? "dark" : "light"}
+                                lazyLoadEmojis
+                              />
+                            </Suspense>
+                          </div>
+                        ) : (
+                          <Suspense fallback={<div className="h-[380px] w-[300px] animate-pulse bg-[var(--surface-2)]" aria-label="Loading GIF picker" />}>
+                            <GifPicker onGifSelect={handleGifSend} />
+                          </Suspense>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <textarea
+                    ref={inputRef}
+                    rows={1}
+                    placeholder="Type here"
+                    value={text}
+                    onChange={handleTyping}
+                    onBlur={stopTyping}
+                    onKeyDown={handleKeyDown}
+                    onPaste={handleTextareaPaste}
+                    className="chat-input composer-textarea w-full resize-none"
+                    id="chat-message-input"
+                    aria-label="Message input"
+                    style={{
+                      minHeight: "36px",
+                      maxHeight: "160px",
+                      overflowY: text && inputRef.current && inputRef.current.scrollHeight > 160 ? "auto" : "hidden",
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => imageInputRef.current?.click()}
+                  className="icon-btn-glass min-h-11 min-w-11 shrink-0 border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                  aria-label="Add photo"
+                  title="Add photo"
+                >
+                  <ImageIcon size={18} />
+                </button>
+                <div className="relative shrink-0" ref={quickActionsRef}>
+                  <button
+                    type="button"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => setShowQuickActions((open) => !open)}
+                    className="icon-btn-glass min-h-11 min-w-11 border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                    aria-label="More message actions"
+                    aria-expanded={showQuickActions}
+                    aria-haspopup="menu"
+                    title="More message actions"
+                  >
+                    <Plus size={19} />
+                  </button>
+                  <AnimatePresence>
+                    {showQuickActions && (
+                      <motion.div
+                        role="menu"
+                        aria-label="Message actions"
+                        initial={shouldReduceMotion ? false : { opacity: 0, y: 8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.96 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+                        className="glass quick-action-menu absolute bottom-full right-0 z-50 mb-2 w-48 p-1.5"
+                      >
+                        <button type="button" role="menuitem" className="quick-action-row min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]" onClick={() => { setShowQuickActions(false); queueInputRef.current?.click(); }}>
+                          <Paperclip size={16} /> File
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
-
-          <textarea
-            ref={inputRef}
-            rows={1}
-            placeholder="Type here"
-            value={text}
-            onChange={handleTyping}
-            onKeyDown={handleKeyDown}
-            onPaste={handleTextareaPaste}
-            className="chat-input composer-textarea w-full resize-none"
-            id="chat-message-input"
-            aria-label="Message input"
-            style={{
-              minHeight: "36px",
-              maxHeight: "160px",
-              overflowY: text && inputRef.current && inputRef.current.scrollHeight > 160 ? "auto" : "hidden",
-            }}
-          />
-          </div>
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            className="icon-btn-glass h-9 w-9 flex-shrink-0 border-0 bg-transparent"
-            aria-label="Add photo"
-            title="Add photo"
-          >
-            <ImageIcon size={18} />
-          </button>
         </div>
 
         <input
@@ -1143,76 +1907,87 @@ const Input = () => {
         />
 
         <AnimatePresence initial={false} mode="wait">
-          {!text.trim() && attachmentQueue.length === 0 ? (
-            <div className="relative flex-shrink-0" ref={quickActionsRef}>
-              <motion.button
-                key="quick-actions"
-                type="button"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                whileTap={{ scale: 0.96 }}
-                onClick={() => setShowQuickActions((open) => !open)}
-                className="fab h-12 w-12"
-                id="chat-quick-actions"
-                aria-label="More message actions"
-                aria-expanded={showQuickActions}
-                aria-haspopup="menu"
-              >
-                <Plus size={21} />
-              </motion.button>
-              <AnimatePresence>
-                {showQuickActions && (
-                  <motion.div
-                    role="menu"
-                    aria-label="Message actions"
-                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 30 }}
-                    className="glass quick-action-menu absolute bottom-full right-0 z-50 mb-2 w-48 p-1.5"
-                  >
-                    <button type="button" role="menuitem" className="quick-action-row" onClick={() => { setShowQuickActions(false); queueInputRef.current?.click(); }}>
-                      <Paperclip size={16} /> File
-                    </button>
-                    <button type="button" role="menuitem" className="quick-action-row" onClick={() => { setShowQuickActions(false); setShowEmojiPicker(false); setShowGifPicker(true); }}>
-                      <Film size={16} /> GIF / Sticker
-                    </button>
-                    <button type="button" role="menuitem" disabled className="quick-action-row is-disabled" title="Voice messages are not available yet">
-                      <Mic size={16} /> Voice message <span className="ml-auto text-[10px]">Soon</span>
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          ) : (
+          {voiceState === "requesting" ? (
+            <motion.button
+              key="voice-requesting"
+              type="button"
+              disabled
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              className="send-btn h-12 w-12 flex-shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              aria-label="Waiting for microphone"
+            >
+              <Loader2 size={18} className={shouldReduceMotion ? "" : "animate-spin"} />
+            </motion.button>
+          ) : voiceState === "recording" || voiceState === "preview" ? (
+            <motion.button
+              key="voice-send"
+              type="button"
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              whileHover={canHover && !shouldReduceMotion ? { scale: 1.05 } : undefined}
+              whileTap={!shouldReduceMotion ? { scale: 0.95 } : undefined}
+              onClick={() => (voiceState === "recording" ? stopVoiceRecording(true) : sendVoicePreview())}
+              className="send-btn h-12 w-12 flex-shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              aria-label="Send voice message"
+              style={{ touchAction: "manipulation" }}
+            >
+              <Send size={18} className="ml-0.5" />
+            </motion.button>
+          ) : hasComposerContent ? (
             <motion.button
               key="send"
               type="button"
-              initial={{ opacity: 0, scale: 0.8 }}
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              whileHover={canHover ? { scale: 1.05 } : undefined}
-              whileTap={{ scale: 0.95 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              whileHover={canHover && !shouldReduceMotion ? { scale: 1.05 } : undefined}
+              whileTap={!shouldReduceMotion ? { scale: 0.95 } : undefined}
               onClick={handleSend}
               disabled={attachmentQueue.some((item) => item.status === "compressing" || item.status === "uploading")}
-              className="send-btn h-12 w-12 flex-shrink-0 rounded-full"
+              className="send-btn h-12 w-12 flex-shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
               id="chat-send-btn"
               aria-label="Send message"
               style={{ touchAction: "manipulation" }}
             >
               <Send size={18} className="ml-0.5" />
             </motion.button>
+          ) : (
+            <motion.button
+              key="voice-mic"
+              type="button"
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.14 }}
+              whileHover={canHover && voiceSupported && !shouldReduceMotion ? { scale: 1.05 } : undefined}
+              whileTap={voiceSupported && !shouldReduceMotion ? { scale: 0.95 } : undefined}
+              onClick={startVoiceRecording}
+              disabled={!voiceSupported}
+              className="send-btn h-12 w-12 flex-shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              aria-label={voiceSupported ? "Record voice message" : voiceSupportMessage}
+              title={voiceSupported ? "Record voice message" : voiceSupportMessage}
+              style={{ touchAction: "manipulation" }}
+            >
+              <Mic size={19} />
+            </motion.button>
           )}
         </AnimatePresence>
       </div>
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{voiceAnnouncement}</p>
+      {voiceNotice && <p className="px-2 pt-1 text-xs text-[var(--text-secondary)]" role="status">{voiceNotice}</p>}
 
       {attachmentQueue.length > 0 && (
         <div className="mt-3 space-y-2">
           {attachmentQueue.length === 1 && attachmentQueue[0]?.file?.type?.startsWith("image/") && attachmentQueue[0].status !== "blocked" && (
             <div className="glass rounded-2xl p-2">
               <div className="relative">
-                <img src={attachmentQueue[0].previewUrl || attachmentQueue[0].result?.url} alt="Attachment preview" className="h-36 w-full rounded-xl object-cover" />
+                <LazyImage src={attachmentQueue[0].previewUrl || attachmentQueue[0].result?.url} alt="Attachment preview" width={320} height={180} className="h-36 w-full rounded-xl" />
                 {attachmentQueue[0].status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={22} className="animate-spin text-white" aria-label="Compressing image" /></div>}
               </div>
               <div className="mt-2 flex items-center justify-between gap-2">
@@ -1224,10 +1999,10 @@ const Input = () => {
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
                   {isHdCapableImage(attachmentQueue[0].file) && (
-                    <button type="button" onClick={() => setAttachmentHd(attachmentQueue[0].id, !attachmentQueue[0].hd)} aria-pressed={attachmentQueue[0].hd} title="Send original quality (uses more storage)" className={`rounded-md border px-2 py-1 text-[10px] font-bold ${attachmentQueue[0].hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                    <button type="button" onClick={() => setAttachmentHd(attachmentQueue[0].id, !attachmentQueue[0].hd)} aria-pressed={attachmentQueue[0].hd} title="Send original quality (uses more storage)" className={`rounded-md border px-2 py-1 text-[10px] font-bold ${attachmentQueue[0].hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-[var(--on-primary)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
                   )}
                   <button type="button" onClick={() => removeAttachment(attachmentQueue[0].id)} className="text-xs font-semibold text-[var(--danger-text)]">Remove</button>
-                  <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "compressing" || attachmentQueue[0].status === "uploading" || attachmentQueue[0].status === "error"} className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Send</button>
+                  <button type="button" onClick={handleSend} disabled={attachmentQueue[0].status === "compressing" || attachmentQueue[0].status === "uploading" || attachmentQueue[0].status === "error"} className="rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-[var(--on-primary)] disabled:opacity-50">Send</button>
                 </div>
               </div>
             </div>
@@ -1241,7 +2016,7 @@ const Input = () => {
                 onClick={() => setAllImagesHd(!allImagesHd)}
                 aria-pressed={mixedImageHd ? "mixed" : allImagesHd}
                 title="Send original quality (uses more storage)"
-                className={`rounded-md border px-2 py-1 text-[10px] font-bold ${allImagesHd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}
+                className={`rounded-md border px-2 py-1 text-[10px] font-bold ${allImagesHd ? "border-[var(--primary-border)] bg-[var(--primary)] text-[var(--on-primary)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}
               >
                 HD all{mixedImageHd ? " ·" : ""}
               </button>
@@ -1277,7 +2052,7 @@ const Input = () => {
 
                   {hasPreview ? (
                     <div className="relative">
-                      <img src={item.previewUrl || item.result?.url} alt={item.file.name || "Attachment preview"} className="h-20 w-full rounded-xl object-cover" />
+                      <LazyImage src={item.previewUrl || item.result?.url} alt={item.file.name || "Attachment preview"} width={160} height={90} className="h-20 w-full rounded-xl" />
                       {item.status === "compressing" && <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/30"><Loader2 size={16} className="animate-spin text-white" aria-label="Compressing image" /></div>}
                     </div>
                   ) : (
@@ -1289,7 +2064,7 @@ const Input = () => {
                   {!item.file.type?.startsWith("image/") && <div className="mt-2 text-[10px] text-[var(--text-secondary)]">{formatBytes(item.file.size)}</div>}
 
                   {isHdCapableImage(item.file) && (
-                    <button type="button" onClick={() => setAttachmentHd(item.id, !item.hd)} aria-pressed={item.hd} title="Send original quality (uses more storage)" className={`mt-2 rounded-md border px-2 py-1 text-[10px] font-bold ${item.hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-white" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
+                    <button type="button" onClick={() => setAttachmentHd(item.id, !item.hd)} aria-pressed={item.hd} title="Send original quality (uses more storage)" className={`mt-2 rounded-md border px-2 py-1 text-[10px] font-bold ${item.hd ? "border-[var(--primary-border)] bg-[var(--primary)] text-[var(--on-primary)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>HD</button>
                   )}
 
                   {item.status === "uploading" && (
@@ -1307,7 +2082,7 @@ const Input = () => {
                   {item.status === "error" && (
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1 text-[10px] text-[var(--danger-text)]"><AlertTriangle size={12} />{item.error || "Upload failed"}</div>
-                      {item.retryable && <button type="button" onClick={() => startAttachmentUpload(item)} className="inline-flex items-center gap-1 rounded-lg bg-[var(--primary)] px-2 py-1 text-[10px] font-semibold text-white"><RefreshCw size={11} />Retry</button>}
+                      {item.retryable && <button type="button" onClick={() => startAttachmentUpload(item)} className="inline-flex items-center gap-1 rounded-lg bg-[var(--primary)] px-2 py-1 text-[10px] font-semibold text-[var(--on-primary)]"><RefreshCw size={11} />Retry</button>}
                     </div>
                   )}
 
@@ -1324,6 +2099,92 @@ const Input = () => {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {forwardingMessage && (
+          <motion.div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--overlay)] p-4"
+            initial={shouldReduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0 }}
+            role="presentation"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              aria-label="Close forward voice message"
+              onClick={() => !forwardingBusy && setForwardingMessage(null)}
+            />
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="forward-voice-title"
+              aria-describedby="forward-voice-description"
+              initial={shouldReduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.98 }}
+              className="glass relative z-[1] flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[var(--border)] p-4 shadow-xl"
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 id="forward-voice-title" className="text-base font-semibold text-[var(--text-primary)]">Forward voice message</h2>
+                <button
+                  type="button"
+                  className="icon-btn min-h-11 min-w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                  aria-label="Close forward voice message"
+                  disabled={forwardingBusy}
+                  onClick={() => setForwardingMessage(null)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <p id="forward-voice-description" className="mb-3 text-sm text-[var(--text-secondary)]">Choose a chat to send this voice message to.</p>
+              <div className="media-card mb-4 rounded-2xl border px-3 py-2.5">
+                <VoiceMessage
+                  message={forwardingMessage}
+                  isOwn={forwardingMessage.senderId === currentUser?.uid}
+                />
+              </div>
+              {forwardError && <p className="mb-3 text-sm text-[var(--danger-text)]" role="alert">{forwardError}</p>}
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="Available chats">
+                {forwardTargets.map(([targetChatId, chat]) => {
+                  const targetUser = chat.userInfo;
+                  const title = targetUser.displayName || targetUser.name || "Conversation";
+                  const isGroup = Boolean(targetUser.isGroup);
+                  return (
+                    <button
+                      key={targetChatId}
+                      type="button"
+                      className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[var(--text-primary)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] disabled:cursor-wait disabled:opacity-60"
+                      disabled={forwardingBusy}
+                      aria-label={`Forward voice message to ${title}`}
+                      onClick={() => forwardVoiceMessage(targetChatId, targetUser)}
+                    >
+                      {forwardingChatId === targetChatId && forwardingBusy
+                        ? <Loader2 size={17} className={shouldReduceMotion ? "" : "animate-spin"} aria-hidden="true" />
+                        : <Forward size={17} className="text-[var(--primary)]" aria-hidden="true" />}
+                      <span className="min-w-0 flex-1 truncate">{title}</span>
+                      <span className="text-xs text-[var(--text-muted)]">{isGroup ? "Group" : "Chat"}</span>
+                    </button>
+                  );
+                })}
+                {forwardTargets.length === 0 && (
+                  <p className="px-3 py-5 text-center text-sm text-[var(--text-secondary)]">No chats are available to forward to.</p>
+                )}
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-xl border border-[var(--border)] px-4 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] disabled:opacity-60"
+                  disabled={forwardingBusy}
+                  onClick={() => setForwardingMessage(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {isDragOver && (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center border-2 border-dashed border-[var(--primary-border)] bg-[var(--primary-soft)]">

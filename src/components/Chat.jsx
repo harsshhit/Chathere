@@ -1,20 +1,18 @@
-import React, { useContext } from "react";
-import { ArrowLeft, MessageSquare, MessageSquareOff, MoreHorizontal, Search } from "lucide-react";
+import React, { lazy, Suspense, useContext } from "react";
+import { ArrowLeft, MessageSquare, MessageSquareOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
 import Messages from "./Messages";
 import Input from "./Input";
-import { ChatContext, ContactPanelContext, ContactPanelActionsContext } from "../context/ChatContext";
+import { ChatContext, ContactPanelContext, ContactPanelActionsContext } from "../context/ChatContexts";
 import Avatar from "./Avatar";
-import ContactPanel from "./ContactPanel";
+import { formatTime } from "../utils/formatters";
+
+const ContactPanel = lazy(() => import("./ContactPanel"));
 
 const formatLastSeen = (value) => {
-  const date = value?.toDate
-    ? value.toDate()
-    : new Date(value?.seconds ? value.seconds * 1000 : value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : `last seen ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  const time = formatTime(value);
+  return time ? `last seen ${time}` : "";
 };
 
 const ChatSkeleton = ({ onBack }) => (
@@ -80,7 +78,7 @@ const ChatNotFound = ({ onBack }) => (
     </p>
     <button
       onClick={onBack}
-      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors"
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-[var(--on-primary)] bg-[var(--primary)] hover:bg-[var(--primary-hover)] transition-colors"
       style={{ touchAction: "manipulation" }}
     >
       <ArrowLeft size={14} /> Back to Chats
@@ -180,24 +178,6 @@ const Chat = () => {
               </button>
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new Event("chathere:open-command-palette"))}
-                className="icon-btn-glass"
-                aria-label="Search chats"
-                title="Search chats"
-              >
-                <Search size={17} strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                onClick={() => openContactPanel(data.user)}
-                className="icon-btn-glass"
-                aria-label="Open chat details"
-                title="Chat details"
-              >
-                <MoreHorizontal size={18} strokeWidth={1.75} />
-              </button>
             </div>
           </div>
 
@@ -239,7 +219,7 @@ const Chat = () => {
         </div>
       )}
 
-      {contactPanel.open && <ContactPanel onFocusMessage={() => window.setTimeout(() => document.getElementById("chat-message-input")?.focus(), 50)} onShowInChat={showMessageInChat} />}
+      {contactPanel.open && <Suspense fallback={<div className="fixed inset-y-0 right-0 z-50 w-full max-w-[440px] bg-[var(--surface-2)] p-4" aria-label="Loading contact panel"><div className="mb-6 h-8 w-32 animate-pulse rounded-lg bg-[var(--surface-3)]" /><div className="mx-auto mb-4 h-24 w-24 animate-pulse rounded-full bg-[var(--surface-3)]" /><div className="h-40 animate-pulse rounded-2xl bg-[var(--surface-3)]" /></div>}><ContactPanel onFocusMessage={() => window.setTimeout(() => document.getElementById("chat-message-input")?.focus(), 50)} onShowInChat={showMessageInChat} /></Suspense>}
     </motion.div>
   );
 };

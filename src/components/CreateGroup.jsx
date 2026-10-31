@@ -1,12 +1,15 @@
 import React, { useState, useContext, useEffect } from "react";
 import { X, Check, Users, Search as SearchIcon, Loader2, Upload } from "lucide-react";
 import { motion } from "framer-motion";
-import { collection, query, getDocs, setDoc, doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, getDocs, setDoc, doc, serverTimestamp, where, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { AuthContext } from "../context/AuthContext";
 import { v4 as uuid } from "uuid";
 import Avatar from "./Avatar";
 import { uploadImage } from "../utils/cloudinary";
+import LazyImage from "./ui/LazyImage";
+import { ScrollRootProvider } from "../context/ScrollRootContext";
+import { normalizeSearchText } from "../utils/searchableName";
 
 const CreateGroup = ({ onClose }) => {
   const { currentUser } = useContext(AuthContext);
@@ -22,42 +25,50 @@ const CreateGroup = ({ onClose }) => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [photoError, setPhotoError] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [groupError, setGroupError] = useState("");
   const photoInputRef = React.useRef(null);
+  const memberListRef = React.useRef(null);
+  const creatingRef = React.useRef(false);
 
   useEffect(() => () => {
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
   }, [photoPreviewUrl]);
 
   useEffect(() => {
+    let active = true;
     const searchUsers = async () => {
-      if (!searchTerm.trim()) {
+      const normalizedTerm = normalizeSearchText(searchTerm);
+      if (!normalizedTerm || !currentUser?.uid) {
         setUsers([]);
+        setLoading(false);
         return;
       }
       setLoading(true);
       try {
-        const q = query(collection(db, "users"));
+        const q = query(
+          collection(db, "users"),
+          where("displayNameLower", ">=", normalizedTerm),
+          where("displayNameLower", "<=", `${normalizedTerm}\uf8ff`),
+          limit(25)
+        );
         const snapshot = await getDocs(q);
-        const results = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          if (
-            data.displayName &&
-            data.displayName.toLowerCase().includes(searchTerm.toLowerCase()) &&
-            data.uid !== currentUser.uid
-          ) {
-            results.push(data);
-          }
-        });
+        if (!active) return;
+        const results = snapshot.docs
+          .map((userDoc) => userDoc.data())
+          .filter((data) => data?.uid && data.uid !== currentUser.uid)
+          .slice(0, 25);
         setUsers(results);
       } catch (err) {
-        console.error(err);
+        if (active) console.error("Could not search users for group members:", err);
       }
-      setLoading(false);
+      if (active) setLoading(false);
     };
 
     const timer = setTimeout(() => searchUsers(), 300);
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [searchTerm, currentUser.uid]);
 
   const toggleUser = (user) => {
@@ -107,14 +118,24 @@ const CreateGroup = ({ onClose }) => {
   };
 
   const handleCreateGroup = async () => {
-    if (!groupName.trim() || selectedUsers.length === 0) return;
+    if (creatingRef.current || !groupName.trim() || selectedUsers.length === 0) return;
+    creatingRef.current = true;
     setCreating(true);
+    setGroupError("");
 
     try {
       const groupId = `group_${uuid()}`;
       const groupMembers = [
-        { uid: currentUser.uid, displayName: currentUser.displayName, photoURL: currentUser.photoURL },
-        ...selectedUsers.map(u => ({ uid: u.uid, displayName: u.displayName, photoURL: u.photoURL }))
+        {
+          uid: currentUser.uid,
+          ...(currentUser.displayName ? { displayName: currentUser.displayName } : {}),
+          ...(currentUser.photoURL ? { photoURL: currentUser.photoURL } : {}),
+        },
+        ...selectedUsers.map((user) => ({
+          uid: user.uid,
+          ...(user.displayName ? { displayName: user.displayName } : {}),
+          ...(user.photoURL ? { photoURL: user.photoURL } : {}),
+        })),
       ];
 
       await setDoc(doc(db, "chats", groupId), { messages: [] });
@@ -128,24 +149,25 @@ const CreateGroup = ({ onClose }) => {
         admin: currentUser.uid,
       };
 
-      for (let member of groupMembers) {
-        await updateDoc(doc(db, "userChats", member.uid), {
-          [`${groupId}.userInfo`]: groupData,
-          [`${groupId}.date`]: serverTimestamp(),
-        }).catch(async () => {
-          await setDoc(doc(db, "userChats", member.uid), {
-            [`${groupId}`]: {
-               userInfo: groupData,
-               date: serverTimestamp()
-            }
-          });
-        });
+      for (const member of groupMembers) {
+        await setDoc(
+          doc(db, "userChats", member.uid),
+          {
+            [groupId]: {
+              userInfo: groupData,
+              date: serverTimestamp(),
+            },
+          },
+          { merge: true }
+        );
       }
 
       onClose();
     } catch (err) {
-      console.error(err);
+      console.error("Could not create group:", err);
+      setGroupError("Could not create the group. Please try again.");
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   };
@@ -176,15 +198,17 @@ const CreateGroup = ({ onClose }) => {
             <X size={18} />
           </button>
         </div>
+        {groupError && <p role="alert" className="text-sm text-[var(--danger-text)]">{groupError}</p>}
 
         <div>
-          <label className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Group Name</label>
+          <label htmlFor="group-name" className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Group Name</label>
           <input 
+            id="group-name"
             type="text" 
             placeholder="E.g., Weekend Plans" 
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
-            className="w-full px-3 py-2.5 text-sm rounded-xl outline-none"
+            className="w-full px-3 py-2.5 text-sm rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
             autoFocus
           />
@@ -196,25 +220,27 @@ const CreateGroup = ({ onClose }) => {
             {uploadingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
             {uploadingPhoto ? `Uploading ${uploadProgress}%` : "Group photo"}
           </button>
-          {photoPreviewUrl && <img src={photoPreviewUrl} alt="Group" className="h-10 w-10 rounded-lg object-cover" />}
+          {photoPreviewUrl && <LazyImage src={photoPreviewUrl} alt="Group" width={40} height={40} className="h-10 w-10 rounded-lg" />}
           {photoError && <div className="min-w-0 flex-1 text-[11px] text-[var(--danger-text)]"><span className="block truncate">{photoError}</span><button type="button" onClick={retryGroupPhotoUpload} disabled={uploadingPhoto} className="font-semibold underline disabled:opacity-50">Retry</button></div>}
         </div>
 
         <div>
-          <label className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Add Members ({selectedUsers.length})</label>
+          <label htmlFor="group-member-search" className="block text-[10px] uppercase text-[var(--text-muted)] mb-1.5 font-bold tracking-wider">Add Members ({selectedUsers.length})</label>
           <div className="relative mb-3">
              <SearchIcon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
              <input 
+               id="group-member-search"
                type="text"
                placeholder="Search users..."
                value={searchTerm}
                onChange={(e) => setSearchTerm(e.target.value)}
-               className="w-full pl-9 pr-3 py-2 rounded-xl outline-none text-sm"
+               className="w-full pl-9 pr-3 py-2 rounded-xl outline-none text-sm focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                style={{ background: "var(--surface-3)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
              />
           </div>
 
-          <div className="flex-1 h-[180px] overflow-y-auto mb-2 custom-scrollbar pr-1">
+          <div ref={memberListRef} className="flex-1 h-[180px] overflow-y-auto mb-2 custom-scrollbar pr-1">
+            <ScrollRootProvider rootRef={memberListRef}>
             {loading ? (
                <div className="h-full flex items-center justify-center">
                  <Loader2 className="animate-spin text-[var(--primary-text)]" size={20} />
@@ -244,6 +270,7 @@ const CreateGroup = ({ onClose }) => {
             ) : (
                <p className="text-center text-xs text-[var(--text-muted)] mt-6">Search to add members</p>
             )}
+            </ScrollRootProvider>
           </div>
         </div>
 

@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userChatsPath(uid) {
+      return /databases/$(database)/documents/userChats/$(uid);
+    }
+
+    function callerChatKeys() {
+      return signedIn() && existsAfter(userChatsPath(request.auth.uid))
+        ? getAfter(userChatsPath(request.auth.uid)).data.keys()
+        : [];
+    }
+
+    function hasChatEntry(uid, chatId) {
+      return exists(userChatsPath(uid))
+        && get(userChatsPath(uid)).data.keys().hasAny([chatId]);
+    }
+
+    function hasChatEntryAfter(uid, chatId) {
+      return existsAfter(userChatsPath(uid))
+        && getAfter(userChatsPath(uid)).data.keys().hasAny([chatId]);
+    }
+
+    function isChatMember(chatId) {
+      return signedIn()
+        && (hasChatEntry(request.auth.uid, chatId)
+          || hasChatEntryAfter(request.auth.uid, chatId));
+    }
+
+    match /users/{uid} {
+      // Phase 1 search currently reads the entire users collection. User documents
+      // include email, so this broad signed-in read exposes that field to peers.
+      // Split public profile data from private account data before tightening search.
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    match /userChats/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid
+        // WEAK CROSS-USER WRITE: message/profile flows update other members' chat
+        // entries. A member can modify any entry key in their own chat list on
+        // another user's document, including its preview, unread count and userInfo.
+        // Replace this with a trusted server-side fanout before deployment.
+        || (signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(callerChatKeys()));
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /chats/{chatId} {
+      // Messages are stored in the chat document's messages array; no messages
+      // subcollection is used by this client.
+      allow read, create, update: if isChatMember(chatId);
+      allow delete: if false;
+    }
+
+    match /fcmTokens/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.tokens is list
+        && request.resource.data.tokens.size() <= 10;
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // No reports, stories, or calls collection is referenced by current source.
+
+    /*
+     * Rules Playground cases (use an authenticated user unless noted):
+     * 1. Unauthenticated get users/{uid}: DENY.
+     * 2. Authenticated user get users/{otherUid}: ALLOW (email exposure noted above).
+     * 3. User create/update users/{theirUid}: ALLOW.
+     * 4. User update users/{otherUid}: DENY.
+     * 5. User listed in userChats/{theirUid} get chats/{chatId}: ALLOW.
+     * 6. User absent from userChats/{theirUid} get chats/{chatId}: DENY.
+     * 7. A member transaction appends a chat message and updates a participant's
+     *    existing userChats entry: ALLOW (weak cross-user write noted above).
+     * 8. User create/update fcmTokens/{otherUid}, or write more than 10 tokens: DENY.
+     *
+     * DRAFT ONLY: do not deploy without validating the cross-user update policy,
+     * account privacy, and transaction behavior in the Firebase Rules Playground.
+     */
+  }
+}

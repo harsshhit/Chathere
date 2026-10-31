@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { MessageCircle, Plus, Settings as SettingsIcon, UserRound } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
-import { UserChatsContext, UserDocumentContext } from "../context/ChatContext";
+import { UserDocumentContext, UserUnreadContext } from "../context/ChatContexts";
 import Avatar from "./Avatar";
 
 const Home = lazy(() => import("../pages/Home"));
@@ -37,7 +37,7 @@ export default function MobileTabShell() {
   const navigate = useNavigate();
   const reduceMotion = useReducedMotion();
   const { currentUser, loading } = useContext(AuthContext);
-  const userChats = useContext(UserChatsContext);
+  const unreadByChat = useContext(UserUnreadContext);
   const userDocument = useContext(UserDocumentContext);
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
@@ -52,11 +52,11 @@ export default function MobileTabShell() {
   const isChat = location.pathname.startsWith("/chat/");
   const isKnownTabRoute = location.pathname === "/" || location.pathname === "/settings" || location.pathname === "/profile";
   const navVisible = isMobile && isKnownTabRoute && !keyboardOpen && !modalOpen;
-  const unreadTotal = useMemo(() => Object.entries(userChats || {}).reduce((total, [chatId, chat]) => {
+  const unreadTotal = useMemo(() => Object.entries(unreadByChat || {}).reduce((total, [chatId, unread]) => {
     const prefs = userDocument.chatPrefs?.[chatId] || {};
     if (prefs.archived || prefs.mutedUntil > clock) return total;
-    return total + Math.max(0, Number(chat?.unread) || 0);
-  }, 0), [clock, userChats, userDocument.chatPrefs]);
+    return total + Math.max(0, Number(unread) || 0);
+  }, 0), [clock, unreadByChat, userDocument.chatPrefs]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 30000);
@@ -102,20 +102,35 @@ export default function MobileTabShell() {
   }, [currentTab]);
 
   useEffect(() => {
-    if (!isMobile || !isKnownTabRoute) return;
+    if (!isKnownTabRoute) return;
     let idleId;
     let timeoutId;
+    let frameId;
     const preload = () => {
+      import("../components/Chat").catch((error) => console.error("Could not preload Chat:", error));
       import("../pages/Profile").catch((error) => console.error("Could not preload Profile:", error));
       import("../pages/Settings").catch((error) => console.error("Could not preload Settings:", error));
     };
-    if ("requestIdleCallback" in window) idleId = window.requestIdleCallback(preload);
-    else timeoutId = window.setTimeout(preload, 800);
+    const schedule = () => {
+      if ("requestIdleCallback" in window) idleId = window.requestIdleCallback(preload, { timeout: 2000 });
+      else timeoutId = window.setTimeout(preload, 2000);
+    };
+    frameId = window.requestAnimationFrame(schedule);
     return () => {
       if (idleId && "cancelIdleCallback" in window) window.cancelIdleCallback(idleId);
       if (timeoutId) window.clearTimeout(timeoutId);
+      if (frameId) window.cancelAnimationFrame(frameId);
     };
-  }, [isMobile, isKnownTabRoute]);
+  }, [isKnownTabRoute]);
+
+  const preloadTab = (tabId) => {
+    const preloaders = {
+      chats: () => import("../pages/Home"),
+      settings: () => import("../pages/Settings"),
+      profile: () => import("../pages/Profile"),
+    };
+    preloaders[tabId]?.().catch((error) => console.error(`Could not preload ${tabId}:`, error));
+  };
 
   const navigateTab = (tab) => {
     if (currentTab === tab.id) {
@@ -188,6 +203,9 @@ export default function MobileTabShell() {
               aria-selected={active}
               aria-label={tab.label}
               onClick={() => navigateTab(tab)}
+              onPointerEnter={() => preloadTab(tab.id)}
+              onFocus={() => preloadTab(tab.id)}
+              onTouchStart={() => preloadTab(tab.id)}
               className={`mobile-nav-tab ${active ? "is-active" : ""}`}
             >
               {tab.id === "profile"
@@ -204,6 +222,9 @@ export default function MobileTabShell() {
           {currentTab === "chats" && <motion.button
             type="button"
             whileTap={{ scale: .96 }}
+            onPointerEnter={() => import("./CreateGroup").catch((error) => console.error("Could not preload group creation:", error))}
+            onFocus={() => import("./CreateGroup").catch((error) => console.error("Could not preload group creation:", error))}
+            onTouchStart={() => import("./CreateGroup").catch((error) => console.error("Could not preload group creation:", error))}
             onClick={openNewGroup}
             className="fab tab-fab inline-flex items-center justify-center"
             aria-label="Create a new group"

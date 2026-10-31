@@ -3,8 +3,14 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { AuthContextProvider } from "./context/AuthContext";
 import reportWebVitals from "./reportWebVitals";
-import { ThemeProvider } from "./context/ThemeContext";
 import { initAudioUnlock } from "./utils/notify";
+import "./utils/perf";
+
+const syncPageVisibility = () => {
+  document.documentElement.toggleAttribute("data-page-hidden", document.hidden);
+};
+syncPageVisibility();
+document.addEventListener("visibilitychange", syncPageVisibility);
 
 // Initialize one-time audio unlock on first user gesture
 initAudioUnlock();
@@ -30,11 +36,9 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <AuthContextProvider>
-    <ThemeProvider>
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    </ThemeProvider>
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
   </AuthContextProvider>
 );
 

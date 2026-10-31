@@ -4,8 +4,6 @@
  * with robust fallbacks, audio unlocks, sound preferences, and vibration.
  */
 
-import { registerPushToken } from "./pushToken";
-
 const SETTINGS_KEY = "chathere_notification_settings";
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {
@@ -158,24 +156,12 @@ export const requestNotificationPermission = async (currentUser) => {
     return false;
   }
 
-  try {
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") {
-      await registerPushToken(currentUser);
-      if ("serviceWorker" in navigator) {
-        try {
-          await navigator.serviceWorker.register("/sw.js", { scope: "/" });
-        } catch (swErr) {
-          console.warn("Service worker registration failed after permission granted:", swErr);
-        }
-      }
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.warn("Error requesting notification permission:", error);
-    return false;
-  }
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") return false;
+
+  const { registerPushToken } = await import("./pushToken");
+  await registerPushToken(currentUser);
+  return true;
 };
 
 /**
@@ -259,11 +245,13 @@ export const playTonePreview = (toneName) => {
 
 /**
  * Displays an OS-level notification via ServiceWorkerRegistration.showNotification().
- * Falls back to new Notification() reliably if service worker is unavailable or times out.
- * Never throws; logs warnings on failures.
+ * Returns whether the browser accepted the notification for display.
  */
 export const notifyMessage = async ({ chatId, title, body, icon }) => {
   try {
+    if (typeof window === "undefined" || !isNotificationSupported()) return false;
+    if (Notification.permission !== "granted") return false;
+
     const settings = getNotificationSettings();
 
     // 1. Play sound chime if sound setting enabled
@@ -275,20 +263,7 @@ export const notifyMessage = async ({ chatId, title, body, icon }) => {
       }
     }
 
-    // 2. Trigger haptic vibration if enabled and supported on mobile
-    if (settings.vibrate && typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try {
-        navigator.vibrate([150, 60, 150]);
-      } catch (vibErr) {
-        // Safe ignore
-      }
-    }
-
     // Check notification permission
-    if (!("Notification" in window) || Notification.permission !== "granted") {
-      return;
-    }
-
     // Resolve message content according to privacy preview setting
     const resolvedBody = settings.showPreview ? (body || "") : "New message received";
     const resolvedIcon = icon || "/icon-192.png";
@@ -308,7 +283,7 @@ export const notifyMessage = async ({ chatId, title, body, icon }) => {
     if ("serviceWorker" in navigator) {
       try {
         // Check for existing active registration first (fastest)
-        let registration = await navigator.serviceWorker.getRegistration();
+        let registration = await navigator.serviceWorker.getRegistration("/");
 
         // If not immediately available, race navigator.serviceWorker.ready with a 1000ms timeout
         if (!registration) {
@@ -323,7 +298,7 @@ export const notifyMessage = async ({ chatId, title, body, icon }) => {
         if (registration && registration.showNotification) {
           await registration.showNotification(title || "ChatHere", notificationOptions);
           swShown = true;
-          return;
+          return true;
         }
       } catch (swErr) {
         console.warn("ServiceWorker showNotification failed, trying fallback:", swErr);
@@ -339,18 +314,23 @@ export const notifyMessage = async ({ chatId, title, body, icon }) => {
           badge: notificationOptions.badge,
           tag: notificationOptions.tag,
           renotify: notificationOptions.renotify,
+          vibrate: notificationOptions.vibrate,
           data: notificationOptions.data,
         });
         fallbackNotification.onclick = () => {
           window.focus();
+          if (chatId) window.location.assign(`/chat/${encodeURIComponent(chatId)}`);
           fallbackNotification.close();
         };
+        return true;
       } catch (nErr) {
         console.warn("new Notification fallback failed:", nErr);
       }
     }
+    return false;
   } catch (err) {
     console.warn("Unexpected error in notifyMessage:", err);
+    return false;
   }
 };
 

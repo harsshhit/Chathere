@@ -1,21 +1,19 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Archive, MessageCircle, Moon, Search, Settings, Star, Sun, UserRound, X, Keyboard } from "lucide-react";
-import { UserChatsContext } from "../context/ChatContext";
+import { MessageCircle, Search, X, Keyboard } from "lucide-react";
+import { UserChatsMetadataContext } from "../context/ChatContexts";
 import { AuthContext } from "../context/AuthContext";
-import { useTheme } from "../context/ThemeContext";
 
 const isEditable = (target) => target instanceof HTMLElement && (
   target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
 );
 
-const CommandPalette = () => {
+const CommandPalette = ({ initialMode = "" }) => {
   const navigate = useNavigate();
-  const chats = useContext(UserChatsContext);
+  const chats = useContext(UserChatsMetadataContext);
   const { currentUser } = useContext(AuthContext);
-  const { theme, toggleTheme } = useTheme();
-  const [open, setOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [open, setOpen] = useState(initialMode === "palette");
+  const [helpOpen, setHelpOpen] = useState(initialMode === "help");
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const dialogRef = useRef(null);
@@ -28,14 +26,6 @@ const CommandPalette = () => {
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const actions = [
-      { id: "starred", label: "Starred messages", icon: Star, run: () => window.alert("Starred messages will be available with Phase A.") },
-      { id: "archived", label: "Archived chats", icon: Archive, run: () => {
-        navigate("/");
-        window.setTimeout(() => window.dispatchEvent(new Event("chathere:show-archived")), 0);
-      } },
-      { id: "theme", label: `Toggle theme (${theme})`, icon: theme === "dark" ? Sun : Moon, run: toggleTheme },
-      { id: "profile", label: "Open profile", icon: UserRound, run: () => navigate("/profile") },
-      { id: "settings", label: "Open settings", icon: Settings, run: () => navigate("/settings") },
       { id: "help", label: "Shortcuts help", icon: Keyboard, run: () => setHelpOpen(true) },
     ];
     const matches = [
@@ -49,14 +39,9 @@ const CommandPalette = () => {
       })),
     ];
     return matches.slice(0, 8);
-  }, [navigate, orderedChats, query, theme, toggleTheme]);
+  }, [navigate, orderedChats, query]);
 
   useEffect(() => {
-    const openPalette = () => {
-      setQuery("");
-      setActiveIndex(0);
-      setOpen(true);
-    };
     const onKeyDown = (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -83,10 +68,8 @@ const CommandPalette = () => {
       else if (event.key === "Escape" && open) setOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("chathere:open-command-palette", openPalette);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("chathere:open-command-palette", openPalette);
     };
   }, [helpOpen, navigate, open, orderedChats]);
 
@@ -132,7 +115,7 @@ const CommandPalette = () => {
       <section ref={dialogRef} role="dialog" aria-modal="true" aria-label="Command palette" onKeyDown={handleDialogKeyDown} className="w-full max-w-lg overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)] shadow-2xl">
         <div className="flex items-center gap-3 border-b border-[var(--border)] px-4">
           <Search size={18} className="text-[var(--text-muted)]" />
-          <input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats and actions" aria-label="Search chats and actions" className="h-14 min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]" />
+          <input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats and actions" aria-label="Search chats and actions" className="h-14 min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]" />
           <button type="button" onClick={() => setOpen(false)} aria-label="Close command palette" className="rounded-md p-2 text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"><X size={17} /></button>
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-2">

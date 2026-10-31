@@ -1,43 +1,56 @@
 import React, { useContext, useRef, useState, useEffect, memo, useCallback } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext, ContactPanelActionsContext } from "../context/ChatContext";
-import { Download, ExternalLink, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile, FileText, Music4, Video } from "lucide-react";
-import { deleteField, doc, FieldPath, getDoc, updateDoc } from "firebase/firestore";
+import { ChatContext, ContactPanelActionsContext } from "../context/ChatContexts";
+import { Download, ExternalLink, ZoomIn, Check, CheckCheck, Edit2, Trash2, X, Check as SaveIcon, Clock, AlertCircle, Reply, Smile, MoreHorizontal, FileText, Video, Forward } from "lucide-react";
+import { deleteField, doc, FieldPath, runTransaction, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import Avatar from "./Avatar";
 import LoveEffect from "./LoveEffect";
 import { getLoveMatches, hasLoveMessage } from "../utils/loveDetect";
-import { optimizeUrl } from "../utils/cloudinary";
+import { cloudinaryUrl } from "../utils/cloudinary";
+import { formatTime } from "../utils/formatters";
+import { formatVoiceDuration } from "../utils/voiceRecorder";
+import { safeHttpUrl } from "../utils/safeUrl";
+import VoiceMessage from "./VoiceMessage";
+import LazyImage from "./ui/LazyImage";
+import LazyVideo from "./ui/LazyVideo";
+import { getOwnMediaUrl, rememberOwnMedia } from "../utils/ownMediaCache";
 
 const playedLoveMessageIds = new Set();
+const galleryNeighbor = (url) => React.createElement("img", {
+  src: cloudinaryUrl(safeHttpUrl(url) || "", { w: 1600, q: "auto", fmt: "auto" }),
+  alt: "",
+  "aria-hidden": true,
+  className: "hidden",
+});
 
-const formatDate = (date) => {
-  if (!date) return "";
-  try {
-    const d = date.toDate ? date.toDate() : new Date(date);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "";
-  }
-};
-
-const QuoteBlock = ({ replyTo, isOwn, onClick }) => (
-  <button
+const QuoteBlock = ({ replyTo, isOwn, onClick }) => {
+  const imageUrl = safeHttpUrl(replyTo.img);
+  return <button
     type="button"
     onClick={onClick}
     className={`message-quote mb-2 block w-full rounded-md border-l-[3px] px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] ${isOwn ? "is-own" : ""}`}
     aria-label={`Jump to message from ${replyTo.senderName || "User"}`}
   >
     <span className="block truncate text-[11px] font-semibold">{replyTo.senderName || "User"}</span>
-    <span
-      className="block text-xs leading-snug"
-      style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-    >
-      {replyTo.type === "image" ? "📷 Photo" : replyTo.type === "gif" ? "GIF" : replyTo.text || "Message"}
+    <span className="flex items-center gap-2">
+      {imageUrl && <LazyImage src={imageUrl} alt="" width={96} height={54} sizes="96px" className="h-[54px] w-24 shrink-0 rounded" />}
+      <span
+        className="block text-xs leading-snug"
+        style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+      >
+        {replyTo.type === "image"
+          ? "📷 Photo"
+          : replyTo.type === "gif"
+            ? "GIF"
+            : replyTo.type === "audio"
+              ? `🎤 Voice message${Number.isFinite(replyTo.duration) ? ` ${formatVoiceDuration(replyTo.duration).replace(/^0(?=\d:)/, "")}` : ""}`
+              : replyTo.text || "Message"}
+      </span>
     </span>
-  </button>
-);
+  </button>;
+};
 
 const Message = ({
   message,
@@ -49,6 +62,8 @@ const Message = ({
   rowGap,
   photoStack = [],
   photoStackLastMessage,
+  nextVoiceMessage = null,
+  priority = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [galleryIndex, setGalleryIndex] = useState(null);
@@ -57,7 +72,7 @@ const Message = ({
   const [editText, setEditText] = useState(message.text || "");
   const [savingEdit, setSavingEdit] = useState(false);
   const { currentUser } = useContext(AuthContext);
-  const { data, setReplyingTo, setEditingMessage } = useContext(ChatContext);
+  const { data, setReplyingTo, setEditingMessage, setForwardingMessage } = useContext(ChatContext);
   const { openContactPanelUser: openMemberPanel } = useContext(ContactPanelActionsContext);
   const ref = useRef();
   const reactionPickerRef = useRef(null);
@@ -66,6 +81,7 @@ const Message = ({
   const galleryPointerRef = useRef(null);
   const [canHover, setCanHover] = useState(false);
   const [reactionPicker, setReactionPicker] = useState(null);
+  const [messageMenu, setMessageMenu] = useState(null);
   const [loveBurstKey, setLoveBurstKey] = useState(0);
   const shouldReduceMotion = useReducedMotion();
   const isLoveMessage = hasLoveMessage(message.text || "");
@@ -108,6 +124,9 @@ const Message = ({
   }, [isLive, isLoveMessage, message.date, message.id, shouldReduceMotion]);
 
   const isOwn = message.senderId === currentUser.uid;
+  const isVoiceMessage = message.type === "audio" || Boolean(message.audio?.url) || message.file?.mime?.startsWith("audio/");
+  const safeImageUrl = safeHttpUrl(message.img);
+  const safeFileUrl = safeHttpUrl(message.file?.url);
   const stackMessages = photoStack.length > 1 ? photoStack : null;
   const displayedStackLast = photoStackLastMessage || message;
   const reactionMessageId = photoStackLastMessage?.id || message.id;
@@ -137,13 +156,17 @@ const Message = ({
   const handleReply = () => {
     if (!message.id) return;
     setEditingMessage(null);
-    const type = message.type === "image" ? "image" : message.type === "gif" || message.img ? "gif" : "text";
+    const isAudio = message.type === "audio" || Boolean(message.audio) || message.file?.mime?.startsWith("audio/");
+    const type = isAudio ? "audio" : message.type === "image" ? "image" : message.type === "gif" || message.img ? "gif" : "text";
+    const duration = message.audio?.duration ?? message.file?.duration ?? message.duration;
     setReplyingTo({
       id: message.id,
       senderId: message.senderId || "",
       senderName: message.senderName || (isOwn ? currentUser.displayName : "User") || "User",
       text: message.text || "",
       type,
+      ...(isAudio && Number.isFinite(duration) ? { duration } : {}),
+      ...(message.img ? { img: message.img } : {}),
     });
   };
 
@@ -169,6 +192,15 @@ const Message = ({
     const left = Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8));
     const top = rect.top >= 58 ? rect.top - 52 : Math.min(rect.bottom + 8, window.innerHeight - 52);
     setReactionPicker({ left, top });
+  };
+
+  const openMessageMenu = (anchor) => {
+    const rect = anchor?.getBoundingClientRect() || ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMessageMenu({
+      left: Math.max(8, Math.min(rect.right - 208, window.innerWidth - 216)),
+      top: Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - 170)),
+    });
   };
 
   const handleReaction = async (emoji) => {
@@ -200,13 +232,41 @@ const Message = ({
     return counts;
   }, {});
 
+  const syncChatPreview = async (transaction, latestMessage) => {
+    const memberUids = data.user?.isGroup
+      ? [...new Set((data.user.members || []).map((member) => member.uid).filter(Boolean))]
+      : [...new Set([currentUser.uid, data.user?.uid].filter(Boolean))];
+    const userChatRefs = memberUids.map((uid) => doc(db, "userChats", uid));
+    const snapshots = await Promise.all(userChatRefs.map((userChatRef) => transaction.get(userChatRef)));
+    const preview = latestMessage
+      ? {
+          text: latestMessage.text || "",
+          senderId: latestMessage.senderId || "",
+          date: latestMessage.date || Date.now(),
+          ...(latestMessage.type ? { type: latestMessage.type } : {}),
+        }
+      : deleteField();
+    const date = latestMessage?.date || (latestMessage ? Date.now() : deleteField());
+
+    snapshots.forEach((snapshot, index) => {
+      if (!snapshot.exists()) return;
+      transaction.update(
+        userChatRefs[index],
+        new FieldPath(data.chatId, "lastMessage"),
+        preview,
+        new FieldPath(data.chatId, "date"),
+        date
+      );
+    });
+  };
+
   const startLongPress = (event) => {
     if (canHover || event.pointerType === "mouse") return;
     const anchor = event.currentTarget;
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = setTimeout(() => {
-      openReactionPicker(anchor);
+      openMessageMenu(anchor);
       if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
     }, 400);
   };
@@ -280,14 +340,20 @@ const Message = ({
     setSavingEdit(true);
     try {
       const chatRef = doc(db, "chats", data.chatId);
-      const chatSnap = await getDoc(chatRef);
-      if (chatSnap.exists()) {
-        const msgs = chatSnap.data().messages || [];
+      await runTransaction(db, async (transaction) => {
+        const chatSnap = await transaction.get(chatRef);
+        if (!chatSnap.exists()) return;
+        const msgs = Array.isArray(chatSnap.data().messages) ? chatSnap.data().messages : [];
+        const messageIndex = msgs.findIndex((item) => item.id === message.id);
+        if (messageIndex === -1) return;
         const updated = msgs.map((m) =>
           m.id === message.id ? { ...m, text: editText.trim(), editedAt: Date.now() } : m
         );
-        await updateDoc(chatRef, { messages: updated });
-      }
+        if (messageIndex === msgs.length - 1) {
+          await syncChatPreview(transaction, updated[messageIndex]);
+        }
+        transaction.update(chatRef, { messages: updated });
+      });
       setIsEditing(false);
     } catch (err) {
       console.error("Error editing message:", err);
@@ -300,12 +366,18 @@ const Message = ({
     if (!window.confirm("Delete this message?")) return;
     try {
       const chatRef = doc(db, "chats", data.chatId);
-      const chatSnap = await getDoc(chatRef);
-      if (chatSnap.exists()) {
-        const msgs = chatSnap.data().messages || [];
+      await runTransaction(db, async (transaction) => {
+        const chatSnap = await transaction.get(chatRef);
+        if (!chatSnap.exists()) return;
+        const msgs = Array.isArray(chatSnap.data().messages) ? chatSnap.data().messages : [];
+        const messageIndex = msgs.findIndex((item) => item.id === message.id);
+        if (messageIndex === -1) return;
         const updated = msgs.filter((m) => m.id !== message.id);
-        await updateDoc(chatRef, { messages: updated });
-      }
+        if (messageIndex === msgs.length - 1) {
+          await syncChatPreview(transaction, updated[updated.length - 1]);
+        }
+        transaction.update(chatRef, { messages: updated });
+      });
     } catch (err) {
       console.error("Error deleting message:", err);
     }
@@ -316,7 +388,9 @@ const Message = ({
     setIsDownloading(true);
     try {
       const link = document.createElement("a");
-      link.href = message.img;
+      const imageUrl = safeHttpUrl(message.img);
+      if (!imageUrl) throw new Error("This image has an unsafe or invalid URL.");
+      link.href = imageUrl;
       link.setAttribute("download", `chat-image-${message.id || Date.now()}`);
       link.setAttribute("target", "_blank");
       document.body.appendChild(link);
@@ -331,7 +405,12 @@ const Message = ({
 
   const handleOpenOriginal = (e) => {
     e.stopPropagation();
-    window.open(message.img, "_blank", "noopener,noreferrer");
+    const imageUrl = safeHttpUrl(message.img);
+    if (!imageUrl) {
+      console.warn("Could not open image with an unsafe or invalid URL.");
+      return;
+    }
+    window.open(imageUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -384,6 +463,10 @@ const Message = ({
           onPointerMove={cancelLongPressOnMove}
           onPointerUp={cancelLongPress}
           onPointerCancel={cancelLongPress}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openMessageMenu(event.currentTarget);
+          }}
           onClick={() => {
             if (isLoveMessage && !shouldReduceMotion) setLoveBurstKey((key) => key + 1);
           }}
@@ -392,16 +475,17 @@ const Message = ({
           <div className="message-edit-row flex items-center gap-1.5 p-1.5">
             <input
               type="text"
+              aria-label="Edit message"
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSaveEdit()}
-              className="bg-transparent text-sm text-[var(--text-primary)] outline-none px-2 py-1 flex-1"
+              className="bg-transparent text-sm text-[var(--text-primary)] outline-none px-2 py-1 flex-1 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
               autoFocus
             />
             <button
               onClick={handleSaveEdit}
               disabled={savingEdit}
-              className="p-1 rounded-lg bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)]"
+              className="p-1 rounded-lg bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-hover)]"
               aria-label="Save edit"
             >
               <SaveIcon size={14} />
@@ -415,7 +499,7 @@ const Message = ({
             </button>
           </div>
         ) : (
-          message.text && (
+          message.text && !(isVoiceMessage && message.text.startsWith("🎤 Voice message")) && (
             <motion.div
               animate={loveBurstKey ? { scale: [1, 1.06, 1] } : { scale: 1 }}
               transition={{ duration: 0.34, ease: "easeOut" }}
@@ -427,7 +511,7 @@ const Message = ({
               {renderLoveText()}
               <span className={`message-meta mt-1 flex items-center justify-end gap-1 text-[11px] ${isOwn ? "message-meta-own" : ""}`}>
                 {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
-                {formatDate(message.date)}
+                {formatTime(message.date, { hour: "2-digit", minute: "2-digit" })}
                 {isOwn && (
                   message.status === "sending" ? (
                     <Clock size={12} className="opacity-75 inline-block" aria-label="Sending" />
@@ -455,11 +539,18 @@ const Message = ({
                   onClick={() => setGalleryIndex(index)}
                   aria-label={`Open photo ${index + 1} of ${stackMessages.length}`}
                 >
-                  <img
-                    src={optimizeUrl(photo.img, 800)}
+                  <LazyImage
+                    src={(photo.senderId === currentUser.uid && getOwnMediaUrl(photo.id)) || safeHttpUrl(photo.img) || ""}
                     alt={`${index + 1} of ${stackMessages.length}`}
-                    loading="lazy"
-                    className="h-full w-full rounded-[14px] object-cover"
+                    width={photo.width}
+                    height={photo.height}
+                    sizes="260px"
+                    priority={priority && index < 2}
+                    className="h-full w-full rounded-[14px]"
+                    manualLoadAction="container"
+                    onLocalBlob={photo.senderId === currentUser.uid
+                      ? (url) => rememberOwnMedia(photo.id, data.chatId, url)
+                      : undefined}
                   />
                 </button>
               ))}
@@ -468,7 +559,7 @@ const Message = ({
               )}
             </div>
             <span className="photo-stack-meta">
-              {formatDate(displayedStackLast.date)}
+              {formatTime(displayedStackLast.date, { hour: "2-digit", minute: "2-digit" })}
               {isOwn && (displayedStackLast.status === "sending"
                 ? <Clock size={12} />
                 : displayedStackLast.status === "failed"
@@ -478,7 +569,7 @@ const Message = ({
                 : <Check size={12} />)}
             </span>
           </div>
-        ) : message.img && (
+        ) : safeImageUrl && (
           <motion.div
             className="relative cursor-pointer overflow-hidden rounded-2xl group"
             onClick={() => setIsExpanded(!isExpanded)}
@@ -490,37 +581,45 @@ const Message = ({
                 <QuoteBlock replyTo={message.replyTo} isOwn={isOwn} onClick={handleQuoteClick} />
               </div>
             )}
-            <img
-              src={optimizeUrl(message.img, isExpanded ? 1600 : 800)}
-              alt="attachment"
-              width={typeof message.width === "number" ? message.width : undefined}
-              height={typeof message.height === "number" ? message.height : undefined}
-              className={`message-image rounded-2xl object-cover transition-all duration-300 ${
-                isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
-              }`}
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.style.display = "none";
-                const placeholder = document.createElement("div");
-                placeholder.style.cssText =
-                  "display:flex;align-items:center;justify-content:center;padding:12px 16px;border-radius:12px;font-size:11px;color:var(--text-muted);background:var(--surface-3);border:1px solid var(--border);min-width:120px;text-align:center;";
-                placeholder.textContent = "Image unavailable";
-                e.currentTarget.parentNode?.insertBefore(placeholder, e.currentTarget.nextSibling);
-              }}
-            />
+            {message.type === "gif" && (message.gifMp4 || message.gifWebm)
+              ? React.createElement(LazyVideo, {
+                src: message.gifMp4 || message.gifWebm,
+                alternateSrc: message.gifMp4 && message.gifWebm ? message.gifWebm : undefined,
+                poster: safeHttpUrl(message.gifPreview) || safeImageUrl,
+                width: message.width,
+                height: message.height,
+                className: `message-image rounded-2xl ${isExpanded ? "max-h-[60vh] w-full" : "max-h-[200px] max-w-[260px]"}`,
+                ariaLabel: "Animated GIF",
+                autoPlayInView: true,
+                kind: "gif",
+              })
+              : <LazyImage
+                src={(isOwn && getOwnMediaUrl(message.id)) || safeImageUrl}
+                alt="attachment"
+                width={message.width}
+                height={message.height}
+                sizes={isExpanded ? "100vw" : "(max-width: 640px) 260px, 320px"}
+                widths={isExpanded ? [320, 640, 960, 1280, 1600] : [320, 640, 960]}
+                priority={priority}
+                objectFit={isExpanded ? "contain" : "cover"}
+                className={`message-image rounded-2xl ${
+                  isExpanded ? "max-h-[60vh] w-full object-contain" : "max-h-[200px] max-w-[260px]"
+                }`}
+                onLocalBlob={isOwn ? (url) => rememberOwnMedia(message.id, data.chatId, url) : undefined}
+              />}
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-200 rounded-2xl flex items-center justify-center">
               <ZoomIn
                 size={22}
                 className="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               />
               {message.hd === true && (
-                <span className="absolute left-2 top-2 rounded bg-[var(--primary)] px-1.5 py-0.5 text-[10px] font-bold text-white shadow">HD</span>
+                <span className="absolute left-2 top-2 rounded bg-[var(--primary)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--on-primary)] shadow">HD</span>
               )}
             </div>
 
             <span className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
               {message.editedAt && <span className="italic mr-0.5">(edited)</span>}
-              {formatDate(message.date)}
+              {formatTime(message.date, { hour: "2-digit", minute: "2-digit" })}
               {isOwn && (
                 message.status === "sending" ? (
                   <Clock size={11} className="opacity-75 inline-block" aria-label="Sending" />
@@ -563,26 +662,48 @@ const Message = ({
             )}
           </motion.div>
         )}
-        {message.file?.url && (
+        {(message.audio?.url || (message.file?.url && (message.type === "audio" || message.file.mime?.startsWith("audio/")))) &&
+          !message.deleted &&
+          !message.deletedAt &&
+          message.type !== "deleted" && (
+          <div className={`media-card mt-1 w-full max-w-sm rounded-2xl border px-3 py-2.5 ${isOwn ? "msg-bubble-sent" : "msg-bubble-received"}`}>
+            {message.replyTo && <QuoteBlock replyTo={message.replyTo} isOwn={isOwn} onClick={handleQuoteClick} />}
+            <VoiceMessage
+              message={message}
+              isOwn={isOwn}
+              chatId={data.chatId}
+              nextMessage={nextVoiceMessage}
+              uploading={message.status === "uploading"}
+              uploadProgress={message.uploadProgress || 0}
+              uploadFailed={message.status === "failed"}
+              uploadError={message.error}
+              onCancelUpload={message.cancel}
+              onRetryUpload={message.retry}
+              onDeleteUpload={message.delete || message.cancel}
+            />
+            <span className={`mt-1 flex items-center justify-end gap-1 text-[11px] ${isOwn ? "message-meta-own" : "text-[var(--text-secondary)]"}`}>
+              {formatTime(message.date, { hour: "2-digit", minute: "2-digit" })}
+              {isOwn && message.status === "uploading" && <Clock size={12} aria-label="Uploading" />}
+              {isOwn && message.status === "failed" && <AlertCircle size={12} className="text-[var(--danger-text)]" aria-label="Failed to send" />}
+              {isOwn && !["uploading", "failed"].includes(message.status) && <Check size={12} aria-label="Sent" />}
+            </span>
+          </div>
+        )}
+        {safeFileUrl && !message.file.mime?.startsWith("audio/") && (
           <div
             className="media-card mt-1 w-full max-w-sm overflow-hidden rounded-2xl border"
           >
             {message.file.mime?.startsWith("video/") ? (
-              <video
-                src={message.file.url}
-                controls
-                preload="metadata"
-                className="max-h-[360px] w-full bg-black"
-                aria-label={message.file.name || "Video attachment"}
-              />
-            ) : message.file.mime?.startsWith("audio/") ? (
-              <div className="flex items-center gap-3 p-3">
-                <Music4 size={18} className="flex-shrink-0 text-[var(--primary-light)]" />
-                <audio src={message.file.url} controls preload="metadata" className="min-w-0 flex-1" aria-label={message.file.name || "Audio attachment"} />
-              </div>
+              React.createElement(LazyVideo, {
+                src: safeFileUrl,
+                width: message.file.width,
+                height: message.file.height,
+                ariaLabel: message.file.name || "Video attachment",
+                className: "max-h-[360px] w-full bg-black",
+              })
             ) : (
               <a
-                href={message.file.url}
+                href={safeFileUrl || undefined}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-3 p-3 transition-colors hover:bg-[var(--hover)]"
@@ -595,9 +716,9 @@ const Message = ({
                 <Download size={16} className="flex-shrink-0 text-[var(--text-muted)]" />
               </a>
             )}
-            {(message.file.mime?.startsWith("video/") || message.file.mime?.startsWith("audio/")) && (
+            {message.file.mime?.startsWith("video/") && (
               <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)]">
-                {message.file.mime.startsWith("video/") ? <Video size={14} /> : <Music4 size={14} />}
+                <Video size={14} />
                 <span className="min-w-0 truncate">{message.file.name || "Media attachment"}</span>
               </div>
             )}
@@ -631,7 +752,7 @@ const Message = ({
         </div>
       </div>
 
-      {!isEditing && message.status !== "sending" && (
+      {canHover && !isEditing && message.status !== "sending" && (
         <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-1 mb-1">
           <button
             type="button"
@@ -651,34 +772,59 @@ const Message = ({
           >
             <Reply size={14} />
           </button>
-          {isOwn && (
-            <>
-          {message.text && (
-            <button
-              onClick={() => {
-                setEditingMessage(message);
-                setReplyingTo(null);
-                setIsEditing(false);
-              }}
-              className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors"
-              title="Edit message"
-              aria-label="Edit message"
-            >
-              <Edit2 size={13} />
-            </button>
-          )}
           <button
-            onClick={handleDelete}
-            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--danger-text)] hover:bg-[var(--hover)] transition-colors"
-            title="Delete message"
-            aria-label="Delete message"
+            type="button"
+            onClick={(event) => openMessageMenu(event.currentTarget)}
+            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary-light)] hover:bg-[var(--hover)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+            title="More message actions"
+            aria-label="More message actions"
+            aria-haspopup="menu"
           >
-            <Trash2 size={13} />
+            <MoreHorizontal size={14} />
           </button>
-            </>
-          )}
         </div>
       )}
+
+      <AnimatePresence>
+        {messageMenu && <>
+          <button type="button" className="fixed inset-0 z-[69] cursor-default" aria-label="Close message actions" onClick={() => setMessageMenu(null)} />
+          <motion.div
+            role="menu"
+            aria-label="Message actions"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            className="glass fixed z-[70] w-52 rounded-xl border border-[var(--border)] p-1 shadow-xl"
+            style={messageMenu}
+          >
+            <button type="button" role="menuitem" className="menu-row" onClick={() => { setMessageMenu(null); openReactionPicker(ref.current); }}>
+              <Smile size={15} />React
+            </button>
+            {isVoiceMessage && !message.deleted && !message.deletedAt && message.type !== "deleted" && (
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-row"
+                onClick={() => {
+                  setMessageMenu(null);
+                  setForwardingMessage(message);
+                }}
+              >
+                <Forward size={15} />Forward voice message
+              </button>
+            )}
+            {isOwn && message.text && <button type="button" role="menuitem" className="menu-row" onClick={() => {
+              setMessageMenu(null);
+              setEditingMessage(message);
+              setReplyingTo(null);
+              setIsEditing(false);
+            }}><Edit2 size={15} />Edit message</button>}
+            {isOwn && <button type="button" role="menuitem" className="menu-row text-[var(--danger-text)]" onClick={() => { setMessageMenu(null); handleDelete(); }}>
+              <Trash2 size={15} />Delete message
+            </button>}
+          </motion.div>
+        </>}
+      </AnimatePresence>
 
       <AnimatePresence>
         {reactionPicker && (
@@ -730,9 +876,13 @@ const Message = ({
             >
               ‹
             </button>
-            <img
-              src={optimizeUrl(stackMessages[galleryIndex].img, 1600)}
+            <LazyImage
+              src={cloudinaryUrl(safeHttpUrl(stackMessages[galleryIndex].img) || "", { w: 1600, q: "auto", fmt: "auto" })}
               alt={`${galleryIndex + 1} of ${stackMessages.length}`}
+              width={stackMessages[galleryIndex].width}
+              height={stackMessages[galleryIndex].height}
+              priority
+              objectFit="contain"
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => { galleryPointerRef.current = event.clientX; }}
               onPointerUp={(event) => {
@@ -744,6 +894,7 @@ const Message = ({
               }}
               className="photo-lightbox-image"
             />
+            {galleryNeighbor(stackMessages[(galleryIndex + 1) % stackMessages.length].img)}
             <button
               type="button"
               className="photo-lightbox-arrow photo-lightbox-next"
@@ -782,6 +933,10 @@ const areMessagePropsEqual = (previous, next) => {
     previousMessage.img === nextMessage.img &&
     previousMessage.width === nextMessage.width &&
     previousMessage.height === nextMessage.height &&
+    previousMessage.gifMp4 === nextMessage.gifMp4 &&
+    previousMessage.gifWebm === nextMessage.gifWebm &&
+    previousMessage.gifPreview === nextMessage.gifPreview &&
+    previous.priority === next.priority &&
     previousMessage.hd === nextMessage.hd &&
     previousMessage.type === nextMessage.type &&
     previousMessage.senderId === nextMessage.senderId &&

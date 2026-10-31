@@ -1,34 +1,19 @@
-import { BrowserRouter, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { BrowserRouter } from "react-router-dom";
+import { lazy, Suspense, useContext } from "react";
 import { UIProvider } from "./context/UIContext";
-import { ChatContextProvider } from "./context/ChatContext";
 import { InstallProvider } from "./context/InstallContext";
+import { AuthContext } from "./context/AuthContext";
 import useVisualViewport from "./utils/useVisualViewport";
-import GlobalNotificationListener from "./components/GlobalNotificationListener";
-import CommandPalette from "./components/CommandPalette";
 import MobileTabShell from "./components/MobileTabShell";
 import "./index.css";
 
-// Listen for service worker notification clicks and navigate to the target chat
-function ServiceWorkerMessageListener() {
-  const navigate = useNavigate();
+const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-
-    const handleMessage = (event) => {
-      if (event.data?.type === "OPEN_CHAT" && event.data.chatId) {
-        navigate(`/chat/${event.data.chatId}`);
-      }
-    };
-
-    navigator.serviceWorker.addEventListener("message", handleMessage);
-    return () => {
-      navigator.serviceWorker.removeEventListener("message", handleMessage);
-    };
-  }, [navigate]);
-
-  return null;
+function RouteContent() {
+  const { currentUser } = useContext(AuthContext);
+  return currentUser
+    ? <Suspense fallback={<div className="min-h-full animate-pulse bg-[var(--surface-2)]" role="status" aria-live="polite">Loading chats</div>}><AuthenticatedApp /></Suspense>
+    : <MobileTabShell />;
 }
 
 const App = () => {
@@ -41,12 +26,9 @@ const App = () => {
           basename="/"
           future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         >
-          <ChatContextProvider>
-          <ServiceWorkerMessageListener />
-          <GlobalNotificationListener />
-          <CommandPalette />
-          <MobileTabShell />
-        </ChatContextProvider>
+          <Suspense fallback={<div className="min-h-[100dvh] animate-pulse bg-[var(--surface-2)]" role="status" aria-live="polite">Loading application</div>}>
+            <RouteContent />
+          </Suspense>
       </BrowserRouter>
     </InstallProvider>
   </UIProvider>

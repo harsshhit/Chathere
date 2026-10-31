@@ -1,5 +1,5 @@
-import { deleteField, doc, FieldPath, onSnapshot, updateDoc } from "firebase/firestore";
-import React, { useContext, useEffect, useState, useRef, memo, useCallback } from "react";
+import { doc, FieldPath, updateDoc } from "firebase/firestore";
+import React, { startTransition, useContext, useEffect, useMemo, useState, useRef, memo, useCallback } from "react";
 import {
   MessageCircle,
   Archive,
@@ -17,14 +17,26 @@ import {
   Users,
 } from "lucide-react";
 import { AuthContext } from "../context/AuthContext";
-import { ChatContext, UserDocumentContext } from "../context/ChatContext";
+import { ChatContext, UserChatsContext, UserDocumentContext } from "../context/ChatContexts";
 import { db } from "../firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useParams } from "react-router-dom";
 import Avatar from "./Avatar";
+import { formatChatListDate } from "../utils/formatters";
+import { saveChatPreference as writeChatPreference, saveMutePreference } from "../utils/chatPreferences";
+import { ScrollRootProvider } from "../context/ScrollRootContext";
 
 // Module-level scroll position cache so scroll position is preserved across navigation
 let savedChatListScroll = 0;
+const EMPTY_PREFERENCES = {};
+
+const getChatTimestamp = (chat) => {
+  const value = chat?.date || chat?.lastMessage?.date;
+  if (value?.toMillis) return value.toMillis();
+  if (value?.seconds) return value.seconds * 1000;
+  if (value instanceof Date) return value.getTime();
+  return Number(value) || 0;
+};
 
 const ChatItem = memo(function ChatItem({
   chatId,
@@ -61,11 +73,14 @@ const ChatItem = memo(function ChatItem({
     lastMessage?.status === "read" ||
     (messageTime && readTimes.some((timestamp) => timestamp >= messageTime))
   );
+  const isVoiceLastMessage = lastMessage?.type === "audio" ||
+    Boolean(lastMessage?.audio?.url) ||
+    lastMessage?.file?.mime?.startsWith("audio/");
   const previewIcon = lastMessage?.type === "image" || lastMessage?.img
     ? ImageIcon
     : lastMessage?.type === "gif"
     ? Film
-    : lastMessage?.file?.mime?.startsWith("audio/")
+    : isVoiceLastMessage
     ? Mic
     : lastMessage?.file
     ? FileText
@@ -77,6 +92,9 @@ const ChatItem = memo(function ChatItem({
       return;
     }
     onSelect(chat.userInfo, chatId);
+  };
+  const preloadChatView = () => {
+    import("./Chat").catch((error) => console.error("Could not preload chat view:", error));
   };
 
   return (
@@ -91,6 +109,9 @@ const ChatItem = memo(function ChatItem({
       exit={{ opacity: 0, x: 8 }}
       transition={{ delay: staggerDelay, duration: 0.2 }}
       onClick={handleSelect}
+      onPointerEnter={preloadChatView}
+      onFocus={preloadChatView}
+      onTouchStart={preloadChatView}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
@@ -165,7 +186,7 @@ const ChatItem = memo(function ChatItem({
               )}
               {PreviewIcon && <PreviewIcon size={15} className="shrink-0 text-[var(--text-muted)]" />}
               <span className="truncate">
-                {lastMessage?.text || (lastMessage ? "Sent an attachment" : "Start a conversation")}
+                {isVoiceLastMessage ? "Voice message" : lastMessage?.text || (lastMessage ? "Sent an attachment" : "Start a conversation")}
               </span>
             </>
           )}
@@ -183,7 +204,7 @@ const ChatItem = memo(function ChatItem({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-center">
+      <div className="chat-row-menu flex shrink-0 items-center justify-center">
         <button
           type="button"
           onClick={(event) => onMenuOpen(event, chatId)}
@@ -201,13 +222,15 @@ const ChatItem = memo(function ChatItem({
 });
 
 const Chats = () => {
-  const [chats, setChats] = useState({});
   const [filter, setFilter] = useState("all");
   const [canHover, setCanHover] = useState(false);
   const [menu, setMenu] = useState(null);
 
   const { currentUser } = useContext(AuthContext);
   const { dispatch, data: activeChatData } = useContext(ChatContext);
+  const chats = useContext(UserChatsContext);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const userDocument = useContext(UserDocumentContext);
   const navigate = useNavigate();
   const { chatId: routeChatId } = useParams();
@@ -233,26 +256,6 @@ const Chats = () => {
     savedChatListScroll = e.currentTarget.scrollTop;
   };
 
-  useEffect(() => {
-    const openArchived = () => setFilter("archived");
-    window.addEventListener("chathere:show-archived", openArchived);
-    return () => window.removeEventListener("chathere:show-archived", openArchived);
-  }, []);
-
-  useEffect(() => {
-    if (!currentUser?.uid) return;
-
-    const unsub = onSnapshot(doc(db, "userChats", currentUser.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        setChats(docSnap.data() || {});
-      } else {
-        setChats({});
-      }
-    });
-
-    return () => unsub();
-  }, [currentUser?.uid]);
-
   const handleSelect = useCallback(
     async (u, chatId) => {
       // Save current scroll position
@@ -273,23 +276,25 @@ const Chats = () => {
       // Navigate to URL
       navigate(`/chat/${targetChatId}`);
 
-      if (chats[chatId]?.unread > 0) {
+      if (chatsRef.current[chatId]?.unread > 0) {
         try {
-          await updateDoc(doc(db, "userChats", currentUser.uid), {
-            [`${chatId}.unread`]: 0,
-          });
+          await updateDoc(
+            doc(db, "userChats", currentUser.uid),
+            new FieldPath(chatId, "unread"),
+            0
+          );
         } catch (err) {
           console.error(err);
         }
       }
     },
-    [currentUser?.uid, dispatch, navigate, chats]
+    [currentUser?.uid, dispatch, navigate]
   );
 
   const saveChatPreference = useCallback(
     async (chatId, key, value) => {
       try {
-        await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", chatId, key), value);
+        await writeChatPreference(currentUser.uid, chatId, key, value);
       } catch (err) {
         console.error("Error saving chat preference:", err);
       }
@@ -315,8 +320,7 @@ const Chats = () => {
     const chatId = menu.chatId;
     setMenu(null);
     try {
-      const value = duration === "off" ? deleteField() : duration === "always" ? 9999999999999 : Date.now() + duration;
-      await updateDoc(doc(db, "users", currentUser.uid), new FieldPath("chatPrefs", chatId, "mutedUntil"), value);
+      await saveMutePreference(currentUser.uid, chatId, duration);
     } catch (err) {
       console.error("Error saving mute preference:", err);
     }
@@ -335,66 +339,48 @@ const Chats = () => {
     await saveChatPreference(chatId, "pinned", !isPinned);
   }, [menu, saveChatPreference, userDocument.chatPrefs]);
 
-  const formatTimestamp = (timestamp) => {
-    if (!timestamp) return "";
-    let date;
-    if (timestamp.seconds) {
-      date = new Date(timestamp.seconds * 1000);
-    } else if (typeof timestamp === "number") {
-      date = new Date(timestamp);
-    } else {
-      return "";
-    }
-    const now = new Date();
-    const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
-      return date.toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-    } else if (diffDays === 1) {
-      return "Yesterday";
-    } else {
-      return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    }
-  };
-
-  const sortedChats = Object.entries(chats || {})
-    .filter(([_, chat]) => chat && chat.userInfo)
-    .sort((a, b) => {
-      const timeA = a[1]?.date?.seconds || a[1]?.lastMessage?.date || 0;
-      const timeB = b[1]?.date?.seconds || b[1]?.lastMessage?.date || 0;
-      return timeB - timeA;
-    });
-
-  const preferences = userDocument.chatPrefs || {};
-  const orderedChats = sortedChats.sort(([chatIdA], [chatIdB]) => Number(Boolean(preferences[chatIdB]?.pinned)) - Number(Boolean(preferences[chatIdA]?.pinned)));
-  const unarchivedChats = orderedChats.filter(([chatId]) => !preferences[chatId]?.archived);
-  const archivedChats = orderedChats.filter(([chatId]) => preferences[chatId]?.archived);
-  const unreadChats = unarchivedChats.filter(([, chat]) => (chat.unread || 0) > 0);
-  const groupChats = unarchivedChats.filter(([, chat]) => chat.userInfo?.isGroup);
-  const pinnedChats = unarchivedChats.filter(([chatId]) => preferences[chatId]?.pinned);
-  const displayedChats = filter === "archived"
-    ? archivedChats
-    : filter === "unread"
-    ? unreadChats
-    : filter === "groups"
-    ? groupChats
-    : filter === "pinned"
-    ? pinnedChats
-    : unarchivedChats;
-  const filterOptions = [
-    { id: "all", label: "All" },
-    { id: "unread", label: "Unread", count: unreadChats.length },
-    { id: "groups", label: "Groups" },
-    { id: "pinned", label: "Pinned" },
-    { id: "archived", label: "Archived", count: archivedChats.length },
-  ];
-  const emptyState = {
-    all: ["No conversations yet", "Search for someone to start chatting."],
-    unread: ["All caught up", "New unread messages will appear here."],
-    groups: ["No group chats yet", "Create a group to bring people together."],
-    pinned: ["No pinned chats", "Pin a chat from its options menu to keep it here."],
-    archived: ["No archived chats", "Archived conversations will appear here."],
-  }[filter];
+  const preferences = userDocument.chatPrefs || EMPTY_PREFERENCES;
+  const { displayedChats, filterOptions, emptyState } = useMemo(() => {
+    const orderedChats = Object.entries(chats || {})
+      .filter(([, chat]) => chat?.userInfo)
+      .sort((a, b) => {
+        return getChatTimestamp(b[1]) - getChatTimestamp(a[1]);
+      })
+      .sort(([chatIdA], [chatIdB]) =>
+        Number(Boolean(preferences[chatIdB]?.pinned)) - Number(Boolean(preferences[chatIdA]?.pinned))
+      );
+    const unarchivedChats = orderedChats.filter(([chatId]) => !preferences[chatId]?.archived);
+    const archived = orderedChats.filter(([chatId]) => preferences[chatId]?.archived);
+    const unread = unarchivedChats.filter(([, chat]) => (chat.unread || 0) > 0);
+    const groups = unarchivedChats.filter(([, chat]) => chat.userInfo?.isGroup);
+    const pinned = unarchivedChats.filter(([chatId]) => preferences[chatId]?.pinned);
+    const filteredChats = filter === "archived"
+      ? archived
+      : filter === "unread"
+      ? unread
+      : filter === "groups"
+      ? groups
+      : filter === "pinned"
+      ? pinned
+      : unarchivedChats;
+    return {
+      displayedChats: filteredChats,
+      filterOptions: [
+        { id: "all", label: "All" },
+        { id: "unread", label: "Unread", count: unread.length },
+        { id: "groups", label: "Groups" },
+        { id: "pinned", label: "Pinned" },
+        { id: "archived", label: "Archived", count: archived.length },
+      ],
+      emptyState: {
+        all: ["No conversations yet", "Search for someone to start chatting."],
+        unread: ["All caught up", "New unread messages will appear here."],
+        groups: ["No group chats yet", "Create a group to bring people together."],
+        pinned: ["No pinned chats", "Pin a chat from its options menu to keep it here."],
+        archived: ["No archived chats", "Archived conversations will appear here."],
+      }[filter],
+    };
+  }, [chats, filter, preferences]);
 
   // After first render, disable the staggered entrance delay
   useEffect(() => {
@@ -406,6 +392,7 @@ const Chats = () => {
   const activeChatId = routeChatId || activeChatData?.chatId;
 
   return (
+    <ScrollRootProvider rootRef={scrollContainerRef}>
     <div
       ref={scrollContainerRef}
       onScroll={handleScroll}
@@ -418,7 +405,7 @@ const Chats = () => {
           <button
             key={id}
             type="button"
-            onClick={() => setFilter(id)}
+            onClick={() => startTransition(() => setFilter(id))}
             aria-pressed={filter === id}
             className={`chip shrink-0 transition-colors ${filter === id ? "chip-active" : ""}`}
           >
@@ -486,7 +473,7 @@ const Chats = () => {
                   hasUnread={hasUnread}
                   unreadCount={unreadCount}
                   isOwnLastMsg={chat.lastMessage?.senderId === currentUser.uid}
-                  formattedDate={formatTimestamp(chat.date)}
+                  formattedDate={formatChatListDate(chat.date)}
                   onSelect={handleSelect}
                   onMenuOpen={handleMenuOpen}
                   preference={preferences[chatId] || {}}
@@ -520,8 +507,8 @@ const Chats = () => {
           </div>
         </>
       )}
-      <style>{`.menu-row{display:flex;align-items:center;gap:.65rem;width:100%;padding:.55rem .65rem;border-radius:.4rem;text-align:left;font-size:.82rem;color:var(--text-primary)}.menu-row:hover,.menu-row:focus-visible{background:var(--hover);outline:none}`}</style>
     </div>
+    </ScrollRootProvider>
   );
 };
 
